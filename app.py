@@ -1,114 +1,154 @@
+
+import json
 import random
-from datetime import datetime
+from datetime import datetime, date
 
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
+
+try:
+    from anthropic import Anthropic
+except Exception:
+    Anthropic = None
+
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
+
 # ---------------- PAGE SETUP ----------------
 st.set_page_config(
-    page_title="AI-Enhanced GRC Risk Intelligence Platform",
+    page_title="Enterprise GRC Risk Intelligence Platform",
     page_icon="🛡️",
     layout="wide"
 )
 
+
 # ---------------- STYLE ----------------
 st.markdown("""
 <style>
-.block-container {
-    padding-top: 1rem;
-    padding-bottom: 2rem;
+.block-container { padding-top: 1.2rem; padding-bottom: 2rem; }
+
+.hero-box {
+    background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 55%, #2563eb 100%);
+    border-radius: 18px;
+    padding: 28px 30px;
+    color: white;
+    margin-bottom: 1.5rem;
 }
+.hero-box h1 { color: white !important; font-size: 1.8rem !important; margin-bottom: 6px; }
+.hero-box p  { color: #dbeafe !important; font-size: 0.98rem; margin: 0; }
+
 .card {
-    background: #161b22;
-    padding: 20px;
-    border-radius: 16px;
-    border: 1px solid #30363d;
+    background: #ffffff;
+    padding: 20px 16px;
+    border-radius: 14px;
+    border: 1px solid #e2e8f0;
     text-align: center;
     margin-bottom: 10px;
 }
-.card h2 {
-    color: #58a6ff !important;
-}
-.card h4 {
-    color: #8b949e !important;
-}
+.card h2 { color: #1e40af !important; font-size: 2rem !important; }
+.card h4 { color: #64748b !important; font-size: 0.82rem !important; text-transform: uppercase; letter-spacing: 0.05em; }
+
+.card.critical { border-left: 5px solid #7f1d1d; background: #fef2f2; }
+.card.high     { border-left: 5px solid #ef4444; background: #fff5f5; }
+.card.medium   { border-left: 5px solid #f59e0b; background: #fffbeb; }
+.card.low      { border-left: 5px solid #22c55e; background: #f0fdf4; }
+
 .section-box {
-    background: #161b22;
-    padding: 18px;
+    background: #f8fafc;
+    padding: 18px 20px;
     border-radius: 14px;
-    border: 1px solid #30363d;
+    border: 1px solid #e2e8f0;
     margin-bottom: 16px;
 }
-.sidebar-card {
-    background: #0d1117;
-    padding: 12px;
+
+.plain-english-box {
+    background: #fffbeb;
+    border: 1px solid #fcd34d;
     border-radius: 12px;
-    border: 1px solid #30363d;
+    padding: 16px 20px;
+    margin: 12px 0;
+    font-size: 1rem;
+    line-height: 1.6;
+    color: #78350f;
+}
+
+.action-tag {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 20px;
+    margin-right: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.tag-now   { background: #fee2e2; color: #991b1b; }
+.tag-week  { background: #fef3c7; color: #92400e; }
+.tag-doc   { background: #dbeafe; color: #1e40af; }
+
+.sidebar-card {
+    background: #f8fafc;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
     margin-bottom: 12px;
+}
+
+.step-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #64748b;
+    margin-bottom: 6px;
+}
+
+.small-muted {
+    color: #64748b;
+    font-size: 0.88rem;
 }
 </style>
 """, unsafe_allow_html=True)
 
+
 # ---------------- SESSION STATE ----------------
-if "history" not in st.session_state:
-    st.session_state.history = []
+defaults = {
+    "history": [],
+    "last_result": None,
+    "selected_asset": "Database",
+    "selected_threat": "Data Breach",
+    "smart_description": "",
+    "input_mode": "smart",
+    "ai_detected": None,
+}
+for key, value in defaults.items():
+    if key not in st.session_state:
+        st.session_state[key] = value
 
-if "last_result" not in st.session_state:
-    st.session_state.last_result = None
-
-if "selected_asset" not in st.session_state:
-    st.session_state.selected_asset = "Database"
-
-if "selected_threat" not in st.session_state:
-    st.session_state.selected_threat = "Data Breach"
 
 # ---------------- DATA ----------------
 ASSET_OPTIONS = [
-    "Database",
-    "Application",
-    "Cloud Environment",
-    "Network",
-    "Endpoint / Laptop",
-    "Email System",
-    "User Credentials",
-    "Server",
-    "API",
-    "Backup System",
-    "Identity / IAM",
-    "SaaS Platform",
-    "Mobile Device",
-    "Vendor / Third Party",
-    "HVAC / Building Management System",
-    "IoT Device",
-    "OT / Industrial System",
-    "Building Access Control",
-    "Security Camera / CCTV",
-    "Finance System",
-    "HR System",
+    "Database", "Application", "Cloud Environment", "Network",
+    "Endpoint / Laptop", "Email System", "User Credentials", "Server",
+    "API", "Backup System", "Identity / IAM", "SaaS Platform",
+    "Mobile Device", "Vendor / Third Party",
+    "HVAC / Building Management System", "IoT Device",
+    "OT / Industrial System", "Building Access Control",
+    "Security Camera / CCTV", "Finance System", "HR System",
     "Customer Portal"
 ]
 
 THREAT_OPTIONS = [
-    "Data Breach",
-    "Unauthorized Access",
-    "Malware",
-    "Phishing",
-    "Misconfiguration",
-    "Insider Threat",
-    "Ransomware",
-    "Supply Chain Attack",
-    "Zero-Day Exploit",
-    "Denial of Service (DDoS)",
-    "Credential Attack",
-    "Data Loss",
-    "Privilege Escalation",
-    "API Abuse"
+    "Data Breach", "Unauthorized Access", "Malware", "Phishing",
+    "Misconfiguration", "Insider Threat", "Ransomware",
+    "Supply Chain Attack", "Zero-Day Exploit",
+    "Denial of Service (DDoS)", "Credential Attack",
+    "Data Loss", "Privilege Escalation", "API Abuse"
 ]
 
 ASSET_THREAT_MAP = {
@@ -136,24 +176,135 @@ ASSET_THREAT_MAP = {
     "Customer Portal": ["Phishing", "API Abuse", "Data Breach", "Denial of Service (DDoS)", "Credential Attack"]
 }
 
+THREAT_PROFILES = {
+    "Data Breach": {"likelihood": 4, "impact": 5},
+    "Unauthorized Access": {"likelihood": 4, "impact": 4},
+    "Malware": {"likelihood": 4, "impact": 4},
+    "Phishing": {"likelihood": 5, "impact": 3},
+    "Misconfiguration": {"likelihood": 4, "impact": 4},
+    "Insider Threat": {"likelihood": 3, "impact": 5},
+    "Ransomware": {"likelihood": 4, "impact": 5},
+    "Supply Chain Attack": {"likelihood": 3, "impact": 5},
+    "Zero-Day Exploit": {"likelihood": 3, "impact": 5},
+    "Denial of Service (DDoS)": {"likelihood": 4, "impact": 4},
+    "Credential Attack": {"likelihood": 5, "impact": 4},
+    "Data Loss": {"likelihood": 3, "impact": 5},
+    "Privilege Escalation": {"likelihood": 3, "impact": 5},
+    "API Abuse": {"likelihood": 4, "impact": 4},
+}
+
+ASSET_THREAT_SCORES = {
+    ("Endpoint / Laptop", "Malware"): (4, 3),
+    ("Endpoint / Laptop", "Phishing"): (4, 3),
+    ("Endpoint / Laptop", "Ransomware"): (3, 4),
+    ("Endpoint / Laptop", "Data Loss"): (3, 4),
+    ("Email System", "Phishing"): (5, 4),
+    ("Email System", "Malware"): (4, 3),
+    ("Email System", "Unauthorized Access"): (3, 4),
+    ("Database", "Data Breach"): (4, 5),
+    ("Database", "Unauthorized Access"): (4, 5),
+    ("Database", "Data Loss"): (3, 5),
+    ("Database", "Ransomware"): (3, 5),
+    ("Cloud Environment", "Misconfiguration"): (5, 5),
+    ("Cloud Environment", "Data Breach"): (4, 5),
+    ("Cloud Environment", "Supply Chain Attack"): (3, 5),
+    ("API", "API Abuse"): (5, 4),
+    ("API", "Denial of Service (DDoS)"): (4, 5),
+    ("API", "Unauthorized Access"): (4, 4),
+    ("Finance System", "Data Breach"): (3, 5),
+    ("Finance System", "Insider Threat"): (3, 5),
+    ("Finance System", "Data Loss"): (3, 5),
+    ("HR System", "Data Breach"): (3, 5),
+    ("HR System", "Phishing"): (4, 4),
+    ("Vendor / Third Party", "Supply Chain Attack"): (4, 5),
+    ("Vendor / Third Party", "Data Breach"): (3, 5),
+    ("Network", "Denial of Service (DDoS)"): (4, 5),
+    ("Network", "Misconfiguration"): (4, 4),
+    ("HVAC / Building Management System", "Unauthorized Access"): (3, 3),
+    ("HVAC / Building Management System", "Misconfiguration"): (3, 3),
+    ("OT / Industrial System", "Ransomware"): (3, 5),
+    ("OT / Industrial System", "Malware"): (3, 5),
+}
+
+EXAMPLE_PROMPTS = [
+    "My laptop was stolen at the airport and it has client data on it",
+    "An employee shared their password with a contractor over Slack",
+    "Our website went down for 3 hours due to a sudden traffic spike",
+    "We got a suspicious email asking us to click a link to verify payroll",
+    "A vendor we share HR data with just had a data breach",
+    "Someone in finance accidentally deleted last quarter's billing records",
+]
+
 TIPS = [
-    "Strong logging makes Detect and Respond much stronger.",
-    "Low-risk items still need owners and review dates.",
-    "Backup quality matters most before ransomware happens.",
-    "Misconfigurations often create silent, high-impact exposure.",
-    "Credential attacks are often stopped by MFA and monitoring."
+    "Risk is not just technical. It affects operations, trust, money, and compliance.",
+    "Residual risk helps companies understand what remains after controls are applied.",
+    "A good risk register should include owner, status, treatment, and review date.",
+    "Zero Trust means verifying every user, device, and request continuously.",
 ]
 
-FUN_FACTS = [
-    "A medium risk ignored for too long can become a high risk.",
-    "Good GRC work is often about prioritization, not panic.",
-    "Not every risk should be mitigated — some are accepted or transferred.",
-    "A good risk register helps teams act, not just document."
-]
+GLOSSARY = {
+    "Inherent Risk": "The risk before considering the effectiveness of existing controls.",
+    "Residual Risk": "The remaining risk after existing controls reduce exposure.",
+    "Control Effectiveness": "How well current safeguards reduce the likelihood or impact of a risk.",
+    "NIST CSF": "A cybersecurity framework used to organize cybersecurity activities around Govern, Identify, Protect, Detect, Respond, and Recover.",
+    "RMF": "Risk Management Framework — a structured process for managing security and privacy risk.",
+    "Zero Trust": "A security model based on verify explicitly, least privilege, and assume breach.",
+    "Risk Treatment": "The decision to Mitigate, Accept, Transfer, or Avoid a risk.",
+}
 
-# ---------------- HELPERS ----------------
-def get_nist_mapping(selected_threat: str) -> str:
-    mapping = {
+
+# ---------------- CORE LOGIC ----------------
+def risk_level(score: int):
+    if score >= 20:
+        return "CRITICAL", "🔴", "#7f1d1d"
+    if score >= 13:
+        return "HIGH", "🔴", "#ef4444"
+    if score >= 7:
+        return "MEDIUM", "🟡", "#f59e0b"
+    return "LOW", "🟢", "#22c55e"
+
+
+def get_formula_text():
+    return {
+        "inherent": "Inherent Risk = Likelihood × Impact",
+        "residual": "Residual Risk = Inherent Risk × (1 - Control Effectiveness)",
+        "control": "Control Effectiveness is rated from 0% to 90% based on how strong existing controls are.",
+        "scale": "Likelihood and Impact are scored from 1 to 5."
+    }
+
+
+def calculate_auto_scores(asset, threat, matched_words=None):
+    matched_words = matched_words or []
+
+    if (asset, threat) in ASSET_THREAT_SCORES:
+        base_likelihood, base_impact = ASSET_THREAT_SCORES[(asset, threat)]
+        source = "asset-threat pair baseline"
+    else:
+        base_likelihood = THREAT_PROFILES.get(threat, {}).get("likelihood", 3)
+        base_impact = THREAT_PROFILES.get(threat, {}).get("impact", 3)
+        source = "threat baseline"
+
+    keyword_boost = 1 if len(matched_words) >= 5 else 0
+    likelihood = max(1, min(5, base_likelihood + keyword_boost))
+    impact = max(1, min(5, base_impact))
+
+    reasons = [
+        f"Used {source}: likelihood {base_likelihood}, impact {base_impact}.",
+        f"Keyword evidence adjustment: +{keyword_boost} to likelihood.",
+        f"Final auto score values: likelihood {likelihood}, impact {impact}."
+    ]
+    return likelihood, impact, reasons
+
+
+def calculate_risks(likelihood, impact, control_effectiveness):
+    inherent = likelihood * impact
+    residual = round(inherent * (1 - control_effectiveness / 100))
+    residual = max(0, residual)
+    return inherent, residual
+
+
+def get_nist_mapping(threat):
+    return {
         "Data Breach": "Govern, Protect, Detect, Respond",
         "Unauthorized Access": "Protect, Detect, Respond",
         "Malware": "Detect, Respond, Recover",
@@ -167,317 +318,204 @@ def get_nist_mapping(selected_threat: str) -> str:
         "Credential Attack": "Protect, Detect, Respond",
         "Data Loss": "Protect, Recover",
         "Privilege Escalation": "Protect, Detect, Respond",
-        "API Abuse": "Protect, Detect, Respond"
+        "API Abuse": "Protect, Detect, Respond",
+    }.get(threat, "Identify, Protect")
+
+
+def get_rmf_mapping(threat):
+    return {
+        "Data Breach": "Categorize, Select, Implement, Assess, Monitor",
+        "Unauthorized Access": "Select, Implement, Assess, Monitor",
+        "Malware": "Implement, Assess, Monitor",
+        "Phishing": "Select, Implement, Monitor",
+        "Misconfiguration": "Categorize, Select, Implement, Assess",
+        "Insider Threat": "Categorize, Select, Assess, Monitor",
+        "Ransomware": "Select, Implement, Assess, Monitor",
+        "Supply Chain Attack": "Categorize, Select, Assess, Monitor",
+        "Zero-Day Exploit": "Select, Implement, Assess, Monitor",
+        "Denial of Service (DDoS)": "Select, Implement, Monitor",
+        "Credential Attack": "Select, Implement, Monitor",
+        "Data Loss": "Categorize, Implement, Monitor",
+        "Privilege Escalation": "Select, Implement, Assess, Monitor",
+        "API Abuse": "Select, Implement, Monitor",
+    }.get(threat, "Categorize, Select, Implement, Monitor")
+
+
+def get_zero_trust_guidance(threat):
+    return {
+        "Data Breach": ["Enforce least-privilege access.", "Encrypt sensitive data.", "Monitor access to critical data stores."],
+        "Unauthorized Access": ["Require MFA.", "Validate device trust.", "Continuously monitor sessions."],
+        "Malware": ["Restrict endpoint privileges.", "Inspect device posture.", "Limit lateral movement."],
+        "Phishing": ["Use phishing-resistant MFA.", "Train users.", "Validate suspicious requests."],
+        "Misconfiguration": ["Use secure baselines.", "Monitor configuration drift.", "Limit admin privileges."],
+        "Ransomware": ["Segment systems and backups.", "Verify privileged access.", "Test recovery procedures."],
+        "Credential Attack": ["Require MFA.", "Detect abnormal login behavior.", "Apply least privilege."],
+        "API Abuse": ["Authenticate every API request.", "Use token validation.", "Monitor API activity."],
+    }.get(threat, ["Verify explicitly.", "Use least privilege.", "Assume breach."])
+
+
+def business_impact(threat, asset, industry):
+    base = {
+        "Data Breach": f"Sensitive information in the {asset.lower()} may be exposed, creating legal, reputational, financial, and compliance impact.",
+        "Unauthorized Access": f"Unauthorized users may access the {asset.lower()}, leading to misuse, data exposure, or operational disruption.",
+        "Malware": f"Malware may disrupt the {asset.lower()}, reduce productivity, corrupt data, or spread across connected systems.",
+        "Phishing": f"Employees may disclose credentials or approve fraudulent actions, increasing the chance of account compromise.",
+        "Misconfiguration": f"Incorrect settings may expose systems or data without immediate detection.",
+        "Insider Threat": f"An internal user may misuse trusted access, creating high business and trust impact.",
+        "Ransomware": f"The {asset.lower()} may become unavailable, causing downtime, recovery costs, and business interruption.",
+        "Supply Chain Attack": f"A vendor or dependency may introduce risk into the organization, affecting trust and operations.",
+        "Zero-Day Exploit": f"An unknown vulnerability may be exploited before patches or detections are available.",
+        "Denial of Service (DDoS)": f"The {asset.lower()} may become unavailable, causing service disruption and customer dissatisfaction.",
+        "Credential Attack": f"Compromised credentials may allow attackers to access business systems and move laterally.",
+        "Data Loss": f"Important information may be deleted, corrupted, or become unrecoverable.",
+        "Privilege Escalation": f"An attacker may gain higher permissions and compromise sensitive systems.",
+        "API Abuse": f"APIs may be misused to access data, disrupt services, or perform unauthorized activity.",
+    }.get(threat, f"The {asset.lower()} may be affected, creating operational or security risk.")
+
+    if industry == "Healthcare":
+        return base + " In healthcare, this may also affect patient trust, care continuity, and privacy obligations."
+    if industry == "Finance":
+        return base + " In finance, this may also increase fraud, regulatory, and customer confidence risks."
+    if industry == "Education":
+        return base + " In education, this may affect students, faculty, research data, and institutional trust."
+    if industry == "Manufacturing":
+        return base + " In manufacturing, this may affect production uptime, safety, and operational continuity."
+    return base
+
+
+def get_recommendations(threat):
+    return {
+        "Data Breach": ["Encrypt sensitive data.", "Apply least privilege access.", "Enable monitoring and alerting.", "Review data retention policies."],
+        "Unauthorized Access": ["Enable MFA.", "Review access permissions.", "Monitor abnormal logins.", "Apply role-based access control."],
+        "Malware": ["Use endpoint protection.", "Patch systems.", "Restrict admin rights.", "Run regular scans."],
+        "Phishing": ["Train users.", "Use email filtering.", "Enable MFA.", "Create a suspicious email reporting process."],
+        "Misconfiguration": ["Apply secure baselines.", "Perform configuration reviews.", "Automate compliance checks.", "Restrict admin access."],
+        "Insider Threat": ["Review access rights.", "Monitor unusual activity.", "Apply separation of duties.", "Create reporting channels."],
+        "Ransomware": ["Maintain offline backups.", "Test recovery plans.", "Patch critical systems.", "Segment the network."],
+        "Supply Chain Attack": ["Assess vendor security.", "Restrict vendor access.", "Review contracts.", "Monitor third-party dependencies."],
+        "Zero-Day Exploit": ["Use layered defenses.", "Monitor anomalies.", "Segment critical systems.", "Patch quickly when fixes are released."],
+        "Denial of Service (DDoS)": ["Use rate limiting.", "Deploy DDoS protection.", "Create failover plans.", "Monitor traffic spikes."],
+        "Credential Attack": ["Enforce MFA.", "Monitor brute-force attempts.", "Use password hygiene controls.", "Disable stale accounts."],
+        "Data Loss": ["Maintain tested backups.", "Restrict deletion rights.", "Use versioning.", "Monitor destructive actions."],
+        "Privilege Escalation": ["Limit admin privileges.", "Monitor privilege changes.", "Use PAM.", "Patch privilege escalation vulnerabilities."],
+        "API Abuse": ["Use authentication.", "Apply rate limits.", "Monitor API usage.", "Review exposed endpoints."]
+    }.get(threat, ["Review controls.", "Monitor risk.", "Document next steps."])
+
+
+def suggest_treatment(threat, residual_score):
+    if residual_score >= 20:
+        return "Mitigate", "Critical residual risk requires immediate reduction."
+    if residual_score >= 13:
+        return "Mitigate", "High residual risk should be reduced through stronger controls."
+    if residual_score >= 7:
+        if threat in ["Supply Chain Attack", "Denial of Service (DDoS)"]:
+            return "Transfer", "Some risk may be transferred through vendors, contracts, or insurance."
+        return "Mitigate", "Medium risk should be reduced within a planned remediation cycle."
+    return "Accept", "Low residual risk may be accepted with monitoring and periodic review."
+
+
+def get_treatment_actions(treatment, residual_score):
+    actions = {
+        "Mitigate": ["Assign a remediation owner.", "Implement or improve controls.", "Set a target completion date.", "Reassess residual risk after remediation."],
+        "Accept": ["Document acceptance rationale.", "Get approval from the risk owner.", "Set a future review date.", "Monitor for changes."],
+        "Transfer": ["Review vendor or insurance options.", "Confirm contractual responsibilities.", "Monitor remaining residual risk.", "Document transfer decision."],
+        "Avoid": ["Stop or redesign the risky activity.", "Identify safer alternatives.", "Document business trade-offs.", "Seek leadership approval."]
     }
-    return mapping.get(selected_threat, "Identify, Protect")
+    base = actions.get(treatment, ["Document the decision."])
+    if residual_score >= 13:
+        base.append("Escalate to leadership or security governance committee.")
+    return base
 
-def get_recommendations(selected_threat: str) -> list[str]:
-    recommendations = {
-        "Data Breach": [
-            "Encrypt sensitive data at rest and in transit",
-            "Apply strong access controls and least privilege",
-            "Enable continuous logging and monitoring"
-        ],
-        "Unauthorized Access": [
-            "Enable Multi-Factor Authentication (MFA)",
-            "Monitor login activity and access anomalies",
-            "Apply role-based access control"
-        ],
-        "Malware": [
-            "Use endpoint protection and anti-malware tools",
-            "Update systems regularly",
-            "Run regular malware scans"
-        ],
-        "Phishing": [
-            "Train users to identify phishing attempts",
-            "Use email filtering and anti-phishing controls",
-            "Report suspicious emails quickly"
-        ],
-        "Misconfiguration": [
-            "Review settings and defaults regularly",
-            "Use secure baselines and hardening standards",
-            "Automate configuration compliance checks"
-        ],
-        "Insider Threat": [
-            "Review access rights regularly",
-            "Monitor unusual employee activity",
-            "Improve reporting and awareness mechanisms"
-        ],
-        "Ransomware": [
-            "Maintain secure and tested backups",
-            "Patch vulnerable systems quickly",
-            "Test incident response and recovery plans"
-        ],
-        "Supply Chain Attack": [
-            "Assess vendor security posture regularly",
-            "Restrict third-party access",
-            "Monitor software and vendor dependencies"
-        ],
-        "Zero-Day Exploit": [
-            "Use layered defenses and anomaly detection",
-            "Patch quickly when fixes become available",
-            "Segment critical systems to reduce blast radius"
-        ],
-        "Denial of Service (DDoS)": [
-            "Use rate limiting and traffic filtering",
-            "Deploy DDoS protection services",
-            "Scale infrastructure and failover capacity"
-        ],
-        "Credential Attack": [
-            "Enable MFA across critical systems",
-            "Monitor brute-force and suspicious login attempts",
-            "Use password hygiene and lockout controls"
-        ],
-        "Data Loss": [
-            "Maintain versioned backups",
-            "Restrict destructive actions",
-            "Test restore procedures regularly"
-        ],
-        "Privilege Escalation": [
-            "Limit admin rights and privileged access",
-            "Monitor privilege changes",
-            "Use privileged access management controls"
-        ],
-        "API Abuse": [
-            "Use rate limits and authentication controls",
-            "Monitor API calls and unusual patterns",
-            "Review exposed endpoints and tokens"
-        ]
-    }
-    return recommendations.get(selected_threat, ["Review controls", "Monitor risk", "Apply best practices"])
 
-def suggest_treatment(selected_threat: str, score: int):
-    if score >= 15:
-        if selected_threat in [
-            "Data Breach", "Unauthorized Access", "Malware", "Ransomware",
-            "Zero-Day Exploit", "Privilege Escalation", "API Abuse"
-        ]:
-            return "Mitigate", "This is a high-priority risk and should usually be reduced quickly through stronger controls."
-        if selected_threat in ["Denial of Service (DDoS)", "Supply Chain Attack"]:
-            return "Transfer", "This high risk may benefit from shared responsibility, vendor controls, insurance, or contractual transfer."
-        return "Avoid", "This is a high-risk scenario, so avoiding or redesigning the activity may be the safest path."
+def fallback_detect_from_description(description):
+    desc = description.lower()
 
-    if score >= 8:
-        if selected_threat in ["Data Loss", "Misconfiguration", "Phishing", "Credential Attack"]:
-            return "Mitigate", "This medium-risk scenario is usually best handled by reducing likelihood or impact."
-        return "Transfer", "This medium-risk scenario may be suitable for transfer through insurance, outsourcing, or contracts."
-
-    return "Accept", "This is a lower-risk scenario, so accepting and monitoring it may be reasonable."
-
-def get_treatment_actions(option: str, score: int):
-    if option == "Mitigate":
-        actions = [
-            "Implement technical or administrative controls",
-            "Assign an owner and remediation timeline",
-            "Reassess the risk after controls are applied"
-        ]
-        if score >= 15:
-            actions.append("Escalate this as a priority remediation item.")
-        return actions
-
-    if option == "Avoid":
-        actions = [
-            "Stop or redesign the risky activity",
-            "Evaluate safer alternatives",
-            "Document the trade-offs before changing the process"
-        ]
-        if score >= 15:
-            actions.append("Consider executive review if the asset is business-critical.")
-        return actions
-
-    if option == "Accept":
-        actions = [
-            "Document the acceptance decision",
-            "Obtain management approval where required",
-            "Review the risk periodically"
-        ]
-        if score >= 15:
-            actions.append("High-risk acceptance should have strong business justification.")
-        return actions
-
-    actions = [
-        "Use insurance, contractual transfer, or outsourcing where appropriate",
-        "Verify vendor responsibilities and SLAs",
-        "Monitor remaining residual risk"
-    ]
-    if score >= 15:
-        actions.append("Ensure transfer agreements cover high-impact scenarios.")
-    return actions
-
-def risk_consequence(selected_threat: str):
-    consequences = {
-        "Data Breach": "Sensitive data could be exposed, leading to legal issues, trust loss, and financial penalties.",
-        "Unauthorized Access": "Attackers may gain control over systems, accounts, or protected data.",
-        "Malware": "Systems may be disrupted, slowed down, or corrupted.",
-        "Phishing": "User credentials or internal access may be stolen.",
-        "Misconfiguration": "Security gaps may quietly grow and expose systems over time.",
-        "Insider Threat": "Internal misuse may bypass controls and damage trust, systems, or data.",
-        "Ransomware": "Critical systems may be locked, disrupting operations and recovery.",
-        "Supply Chain Attack": "A trusted vendor or dependency could introduce compromise into your environment.",
-        "Zero-Day Exploit": "An unknown vulnerability may be exploited before normal defenses catch up.",
-        "Denial of Service (DDoS)": "Systems may become unavailable, causing outages and possible revenue loss.",
-        "Credential Attack": "Repeated login abuse may lead to account compromise and lateral movement.",
-        "Data Loss": "Critical business data may be deleted, corrupted, or become unrecoverable.",
-        "Privilege Escalation": "An attacker may gain more access than intended and compromise sensitive systems.",
-        "API Abuse": "Public or partner-facing services may be misused, causing fraud, downtime, or data exposure."
-    }
-    return consequences.get(selected_threat, "Operational or security issues may increase if the risk is ignored.")
-
-def analyze_uploaded_text(text: str):
-    clean_text = text.lower()
-
-    asset_keywords = {
-        "Database": ["database", "sql", "records", "customer data", "data store"],
-        "Application": ["application", "web app", "portal", "software"],
-        "Cloud Environment": ["cloud", "aws", "azure", "gcp", "bucket", "s3"],
-        "Network": ["network", "router", "switch", "firewall", "vpn"],
-        "Endpoint / Laptop": ["laptop", "desktop", "endpoint", "workstation"],
-        "Email System": ["email", "mailbox", "outlook", "smtp", "inbox"],
-        "User Credentials": ["password", "credentials", "login", "account", "mfa"],
-        "Server": ["server", "host", "linux server", "windows server"],
-        "API": ["api", "endpoint", "token", "integration", "rest"],
-        "Backup System": ["backup", "restore", "recovery copy"],
-        "Identity / IAM": ["iam", "identity", "sso", "privilege", "role"],
-        "SaaS Platform": ["saas", "workspace", "salesforce", "service now"],
-        "Mobile Device": ["mobile", "phone", "tablet", "android", "iphone"],
-        "Vendor / Third Party": ["vendor", "third party", "supplier", "outsourced"],
-        "HVAC / Building Management System": ["hvac", "bms", "thermostat", "building management"],
-        "IoT Device": ["iot", "sensor", "camera", "smart device", "connected device"],
-        "OT / Industrial System": ["ot", "ics", "industrial", "scada", "plc"],
-        "Building Access Control": ["badge", "door access", "building access", "entry system"],
-        "Security Camera / CCTV": ["camera", "cctv", "video surveillance"],
-        "Finance System": ["finance", "payroll", "billing", "invoice"],
-        "HR System": ["hr", "employee records", "personnel", "recruitment"],
-        "Customer Portal": ["customer portal", "client login", "self-service portal"]
+    asset_rules = {
+        "Endpoint / Laptop": ["laptop", "computer", "device", "workstation"],
+        "Email System": ["email", "mail", "inbox", "message"],
+        "User Credentials": ["password", "credentials", "login", "account"],
+        "Customer Portal": ["website", "portal", "customer portal", "site"],
+        "Finance System": ["finance", "billing", "invoice", "payroll"],
+        "HR System": ["hr", "employee", "personnel"],
+        "Vendor / Third Party": ["vendor", "third party", "contractor", "supplier"],
+        "Database": ["database", "data", "records", "client data", "customer data"],
+        "Cloud Environment": ["cloud", "aws", "azure", "gcp"],
+        "API": ["api", "endpoint", "token"],
+        "Backup System": ["backup", "restore", "recovery"],
+        "Network": ["network", "traffic", "router", "switch", "firewall"],
     }
 
-    threat_keywords = {
-        "Data Breach": ["data breach", "data leak", "exposed data", "pii", "phi"],
-        "Unauthorized Access": ["unauthorized access", "intrusion", "illegal access", "unapproved access"],
-        "Malware": ["malware", "virus", "trojan", "infected"],
-        "Phishing": ["phishing", "fake email", "spoofed", "credential theft"],
-        "Misconfiguration": ["misconfiguration", "open port", "public bucket", "default settings"],
-        "Insider Threat": ["insider", "internal misuse", "employee misuse"],
-        "Ransomware": ["ransomware", "encrypted files", "locked system"],
-        "Supply Chain Attack": ["vendor compromise", "third party compromise", "dependency attack", "supply chain"],
-        "Zero-Day Exploit": ["zero-day", "unknown vulnerability", "unpatched exploit"],
-        "Denial of Service (DDoS)": ["ddos", "traffic flood", "service unavailable", "overload"],
-        "Credential Attack": ["brute force", "credential stuffing", "repeated login attempts"],
-        "Data Loss": ["data loss", "accidental deletion", "lost files", "missing backup"],
-        "Privilege Escalation": ["privilege escalation", "admin rights", "elevated access"],
-        "API Abuse": ["api abuse", "endpoint misuse", "token misuse", "rate limit"]
+    threat_rules = {
+        "Phishing": ["suspicious email", "clicked a link", "fake email", "verify payroll", "phishing"],
+        "Data Breach": ["data breach", "exposed", "leaked", "client data", "customer data"],
+        "Unauthorized Access": ["stolen", "someone accessed", "unauthorized", "shared password"],
+        "Credential Attack": ["password", "login", "shared their password", "credentials"],
+        "Denial of Service (DDoS)": ["traffic spike", "website went down", "outage", "ddos"],
+        "Ransomware": ["encrypted", "locked", "ransomware"],
+        "Data Loss": ["deleted", "lost records", "missing files"],
+        "Malware": ["acting strange", "infected", "virus", "malware"],
+        "Supply Chain Attack": ["vendor", "third party", "supplier had a breach"],
+        "Misconfiguration": ["misconfiguration", "open access", "public bucket"],
     }
 
-    matched_assets = {}
-    matched_threats = {}
-    matched_words = []
+    detected_asset = next((asset for asset, words in asset_rules.items() if any(w in desc for w in words)), "Application")
+    detected_threat = next((threat for threat, words in threat_rules.items() if any(w in desc for w in words)), "Unauthorized Access")
 
-    for asset_name, words in asset_keywords.items():
-        score = 0
-        for word in words:
-            if word in clean_text:
-                score += 1
-                matched_words.append(word)
-        if score > 0:
-            matched_assets[asset_name] = score
+    if detected_threat not in ASSET_THREAT_MAP.get(detected_asset, []):
+        detected_threat = ASSET_THREAT_MAP[detected_asset][0]
 
-    for threat_name, words in threat_keywords.items():
-        score = 0
-        for word in words:
-            if word in clean_text:
-                score += 1
-                matched_words.append(word)
-        if score > 0:
-            matched_threats[threat_name] = score
+    return detected_asset, detected_threat
 
-    suggested_asset = max(matched_assets, key=matched_assets.get) if matched_assets else None
-    suggested_threat = max(matched_threats, key=matched_threats.get) if matched_threats else None
 
-    total_matches = len(set(matched_words))
-    if total_matches >= 6:
-        suggested_likelihood, suggested_impact = 4, 4
-    elif total_matches >= 3:
-        suggested_likelihood, suggested_impact = 3, 3
-    elif total_matches >= 1:
-        suggested_likelihood, suggested_impact = 2, 2
-    else:
-        suggested_likelihood, suggested_impact = None, None
+def ai_analyze_description(description):
+    if Anthropic is None:
+        return None
 
-    return suggested_asset, suggested_threat, suggested_likelihood, suggested_impact, sorted(set(matched_words))
+    try:
+        client = Anthropic()
+        system_prompt = f"""
+You are a GRC and cybersecurity risk analyst.
+Return ONLY valid JSON.
 
-def generate_professional_report(df: pd.DataFrame) -> str:
-    report = []
-    report.append("AI-Enhanced GRC Risk Assessment Report")
-    report.append("=" * 65)
-    report.append(f"Generated On: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    report.append("Framework Reference: NIST CSF 2.0 informed educational prototype")
-    report.append("Prepared By: Saloni Bhosale")
-    report.append("")
+Choose asset from:
+{ASSET_OPTIONS}
 
-    if df.empty:
-        report.append("No risk entries available.")
-        return "\n".join(report)
+Choose threat from:
+{THREAT_OPTIONS}
 
-    report.append("Executive Summary")
-    report.append("-" * 65)
-    report.append(f"Total Analyses Conducted: {len(df)}")
-    report.append(f"Average Risk Score: {round(df['Risk Score'].mean(), 2)}")
-    report.append(f"Selected Risk Treatment (Most Recent): {df.iloc[-1]['Final Treatment']}")
-    report.append("")
+Required JSON:
+{{
+  "asset": "<exact asset>",
+  "threat": "<exact threat>",
+  "likelihood": <integer 1-5>,
+  "impact": <integer 1-5>,
+  "plain_english_summary": "<2-3 sentence business-friendly summary>",
+  "actions": [
+    {{"tag": "Do now", "text": "<immediate action>"}},
+    {{"tag": "This week", "text": "<short-term action>"}},
+    {{"tag": "Document", "text": "<documentation step>"}}
+  ],
+  "confidence": "<low|medium|high>"
+}}
+"""
+        response = client.messages.create(
+            model="claude-opus-4-5",
+            max_tokens=800,
+            system=system_prompt,
+            messages=[{"role": "user", "content": description}]
+        )
+        return json.loads(response.content[0].text.strip())
+    except Exception:
+        return None
 
-    for i, row in df.iterrows():
-        report.append(f"Risk Entry {i + 1}")
-        report.append("-" * 65)
-        report.append(f"Asset: {row['Asset']}")
-        report.append(f"Threat: {row['Threat']}")
-        report.append(f"Likelihood: {row['Likelihood']}")
-        report.append(f"Impact: {row['Impact']}")
-        report.append(f"Risk Score: {row['Risk Score']}")
-        report.append(f"Risk Level: {row['Risk Level']}")
-        report.append(f"Suggested Treatment: {row['Suggested Treatment']}")
-        report.append(f"Final Treatment: {row['Final Treatment']}")
-        report.append(f"NIST Mapping: {get_nist_mapping(row['Threat'])}")
 
-        if row["Risk Score"] >= 15:
-            interpretation = "This represents a high-priority risk requiring prompt remediation and management attention."
-        elif row["Risk Score"] >= 8:
-            interpretation = "This represents a moderate risk that should be addressed within a planned remediation cycle."
-        else:
-            interpretation = "This represents a lower risk that may be accepted or monitored with periodic review."
-
-        report.append(f"Interpretation: {interpretation}")
-        report.append(f"Business Impact Summary: {risk_consequence(row['Threat'])}")
-
-        report.append("Recommended Control Actions:")
-        for recommendation in get_recommendations(row["Threat"]):
-            report.append(f"- {recommendation}")
-
-        report.append("Treatment Follow-up Actions:")
-        for action in get_treatment_actions(row["Final Treatment"], int(row["Risk Score"])):
-            report.append(f"- {action}")
-
-        report.append("")
-
-    report.append("Report Notes")
-    report.append("-" * 65)
-    report.append("This report is generated from user-provided scoring inputs and simplified educational risk logic.")
-    report.append("The output is intended to support learning, demonstration, and early-stage portfolio review.")
-    report.append("")
-    report.append("Conclusion")
-    report.append("-" * 65)
-    report.append("This assessment highlights how selected threats can be prioritized, interpreted, and paired with control and treatment decisions using a structured GRC workflow.")
-    report.append("")
-    report.append("=" * 65)
-    report.append("End of Report")
-    return "\n".join(report)
-
+# ---------------- REPORTING ----------------
 def add_page_header_footer(canvas, doc):
     canvas.saveState()
     canvas.setFont("Helvetica-Bold", 10)
     canvas.setFillColor(colors.HexColor("#1f3b73"))
-    canvas.drawString(50, 760, "AI-Enhanced GRC Risk Assessment Report")
+    canvas.drawString(50, 760, "Enterprise GRC Risk Assessment Report")
     canvas.setStrokeColor(colors.HexColor("#d0d7de"))
-    canvas.setLineWidth(0.5)
     canvas.line(50, 755, 560, 755)
     canvas.setFont("Helvetica", 9)
     canvas.setFillColor(colors.HexColor("#6b7280"))
@@ -485,18 +523,17 @@ def add_page_header_footer(canvas, doc):
     canvas.drawRightString(560, 30, f"Page {doc.page}")
     canvas.restoreState()
 
-def make_pdf_table(table_data, col_widths):
-    table = Table(table_data, colWidths=col_widths, hAlign="LEFT")
+
+def pdf_table(data, widths):
+    table = Table(data, colWidths=widths)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1f3b73")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 9.5),
-        ("LEADING", (0, 0), (-1, -1), 12),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#cbd5e1")),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#cbd5e1")),
         ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#f8fafc")),
-        ("TEXTCOLOR", (0, 1), (-1, -1), colors.HexColor("#111827")),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9.2),
         ("LEFTPADDING", (0, 0), (-1, -1), 6),
         ("RIGHTPADDING", (0, 0), (-1, -1), 6),
         ("TOPPADDING", (0, 0), (-1, -1), 6),
@@ -504,589 +541,672 @@ def make_pdf_table(table_data, col_widths):
     ]))
     return table
 
-def generate_pdf_report(df: pd.DataFrame) -> str:
-    file_path = "grc_risk_report.pdf"
+
+def generate_professional_report(df):
+    report = []
+    report.append("ENTERPRISE GRC RISK ASSESSMENT REPORT")
+    report.append("=" * 70)
+    report.append(f"Generated On: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}")
+    report.append("Framework Alignment: NIST CSF 2.0 | RMF | Zero Trust")
+    report.append("Prepared By: Saloni Bhosale")
+    report.append("=" * 70)
+    report.append("")
+
+    if df.empty:
+        report.append("No risk entries are available.")
+        return "\n".join(report)
+
+    report.append("1. EXECUTIVE SUMMARY")
+    report.append("-" * 70)
+    report.append(f"Total Risks Assessed: {len(df)}")
+    report.append(f"Average Inherent Risk Score: {round(df['Inherent Risk'].mean(), 2)} / 25")
+    report.append(f"Average Residual Risk Score: {round(df['Residual Risk'].mean(), 2)} / 25")
+    report.append(f"Highest Residual Risk Score: {df['Residual Risk'].max()} / 25")
+    report.append(f"Open Risks: {(df['Status'] != 'Closed').sum()}")
+    report.append("")
+
+    report.append("2. SCORING METHODOLOGY")
+    report.append("-" * 70)
+    report.append("Inherent Risk = Likelihood x Impact")
+    report.append("Residual Risk = Inherent Risk adjusted by Control Effectiveness")
+    report.append("Likelihood and Impact are scored on a 1 to 5 scale.")
+    report.append("Control Effectiveness represents how much existing controls reduce risk.")
+    report.append("")
+
+    for i, row in df.iterrows():
+        report.append(f"3.{i + 1} RISK ASSESSMENT ENTRY")
+        report.append("-" * 70)
+
+        report.append("Business Context")
+        report.append(f"Company / Unit: {row['Company / Unit']}")
+        report.append(f"Industry: {row['Industry']}")
+        report.append(f"Department: {row['Department']}")
+        report.append(f"Risk Owner: {row['Risk Owner']}")
+        report.append(f"Status: {row['Status']}")
+        report.append(f"Review Date: {row['Review Date']}")
+        report.append("")
+
+        report.append("Risk Overview")
+        report.append(f"Asset: {row['Asset']}")
+        report.append(f"Threat: {row['Threat']}")
+        report.append(f"Likelihood: {row['Likelihood']} / 5")
+        report.append(f"Impact: {row['Impact']} / 5")
+        report.append(f"Inherent Risk: {row['Inherent Risk']} / 25 ({row['Inherent Level']})")
+        report.append(f"Control Effectiveness: {row['Control Effectiveness']}%")
+        report.append(f"Residual Risk: {row['Residual Risk']} / 25 ({row['Residual Level']})")
+        report.append("")
+
+        report.append("Business Impact")
+        report.append(str(row["Business Impact"]))
+        report.append("")
+
+        report.append("Recommended Solution / Controls")
+        for item in str(row["Recommended Controls"]).split(" | "):
+            report.append(f"- {item}")
+        report.append("")
+
+        report.append("Framework Mapping")
+        report.append(f"NIST CSF Mapping: {row['NIST Mapping']}")
+        report.append(f"RMF Mapping: {row['RMF Mapping']}")
+        report.append("Zero Trust Guidance:")
+        for item in str(row["Zero Trust Guidance"]).split(" | "):
+            report.append(f"- {item}")
+        report.append("")
+
+        report.append("Treatment Plan")
+        report.append(f"Recommended Treatment: {row['Final Treatment']}")
+        report.append(f"Treatment Reason: {row['Treatment Reason']}")
+        report.append("Next Steps:")
+        for item in str(row["Next Steps"]).split(" | "):
+            report.append(f"- {item}")
+        report.append("")
+
+    report.append("4. CONCLUSION")
+    report.append("-" * 70)
+    report.append(
+        "This report provides a structured cybersecurity risk assessment using business context, "
+        "risk scoring, control effectiveness, residual risk, framework alignment, and practical remediation guidance."
+    )
+    report.append("")
+    report.append("=" * 70)
+    report.append("END OF REPORT")
+
+    return "\n".join(report)
+
+
+def generate_pdf_report(df):
+    file_path = "enterprise_grc_risk_report.pdf"
 
     doc = SimpleDocTemplate(
         file_path,
         pagesize=letter,
         rightMargin=50,
         leftMargin=50,
-        topMargin=70,
-        bottomMargin=50
+        topMargin=80,
+        bottomMargin=60
     )
 
     styles = getSampleStyleSheet()
+    title = ParagraphStyle("Title", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=24, textColor=colors.HexColor("#0B3D91"), alignment=TA_CENTER)
+    subtitle = ParagraphStyle("Subtitle", parent=styles["Normal"], fontSize=11, textColor=colors.grey, alignment=TA_CENTER)
+    heading = ParagraphStyle("Heading", parent=styles["Heading2"], fontName="Helvetica-Bold", fontSize=15, textColor=colors.HexColor("#1f2937"), spaceBefore=12, spaceAfter=8)
+    subheading = ParagraphStyle("SubHeading", parent=styles["Heading3"], fontName="Helvetica-Bold", fontSize=12, textColor=colors.HexColor("#2563eb"), spaceBefore=8, spaceAfter=5)
+    body = ParagraphStyle("Body", parent=styles["Normal"], fontSize=10.2, leading=14)
 
-    title_style = ParagraphStyle(
-        "CustomTitle",
-        parent=styles["Title"],
-        fontName="Helvetica-Bold",
-        fontSize=22,
-        leading=28,
-        textColor=colors.HexColor("#1f3b73"),
-        alignment=TA_CENTER,
-        spaceAfter=20
-    )
+    content = [
+        Paragraph("Enterprise GRC Risk Assessment Report", title),
+        Spacer(1, 8),
+        Paragraph("Cybersecurity Risk Intelligence Platform", subtitle),
+        Paragraph("Aligned with NIST CSF • RMF • Zero Trust", subtitle),
+        Spacer(1, 12),
+        Paragraph(f"Generated On: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", subtitle),
+        Paragraph("Prepared By: Saloni Bhosale", subtitle),
+        Spacer(1, 20),
+    ]
 
-    subtitle_style = ParagraphStyle(
-        "CustomSubtitle",
-        parent=styles["BodyText"],
-        fontName="Helvetica",
-        fontSize=11,
-        leading=14,
-        textColor=colors.HexColor("#4b5563"),
-        alignment=TA_CENTER,
-        spaceAfter=8
-    )
-
-    heading_style = ParagraphStyle(
-        "CustomHeading",
-        parent=styles["Heading2"],
-        fontName="Helvetica-Bold",
-        fontSize=15,
-        leading=18,
-        textColor=colors.HexColor("#0f172a"),
-        spaceBefore=10,
-        spaceAfter=8
-    )
-
-    subheading_style = ParagraphStyle(
-        "CustomSubHeading",
-        parent=styles["Heading3"],
-        fontName="Helvetica-Bold",
-        fontSize=12,
-        leading=14,
-        textColor=colors.HexColor("#1d4ed8"),
-        spaceBefore=8,
-        spaceAfter=6
-    )
-
-    normal_style = ParagraphStyle(
-        "CustomBody",
-        parent=styles["BodyText"],
-        fontName="Helvetica",
-        fontSize=10.5,
-        leading=14,
-        textColor=colors.HexColor("#111827"),
-        spaceAfter=4
-    )
-
-    note_style = ParagraphStyle(
-        "CustomNote",
-        parent=styles["BodyText"],
-        fontName="Helvetica-Oblique",
-        fontSize=9.5,
-        leading=13,
-        textColor=colors.HexColor("#6b7280"),
-        spaceAfter=6
-    )
-
-    content = []
-
-    content.append(Spacer(1, 43))
-    content.append(Paragraph("AI-Enhanced GRC Risk Assessment Report", title_style))
-    content.append(Paragraph("NIST CSF 2.0 informed educational prototype", subtitle_style))
-    content.append(Spacer(1, 14))
-    content.append(Paragraph(f"Generated On: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", subtitle_style))
-    content.append(Paragraph("Prepared By: Saloni Bhosale", subtitle_style))
-    content.append(Spacer(1, 25))
-    content.append(Paragraph(
-        "This report summarizes selected cyber risk scenarios, their scores, business impact, recommended control actions, and proposed treatment paths.",
-        normal_style
-    ))
-    content.append(Spacer(1, 25))
-
-    content.append(Paragraph("Contents", heading_style))
-    content.append(Paragraph("1. Executive Summary", normal_style))
-    content.append(Paragraph("2. Risk Assessment Entries", normal_style))
-    content.append(Paragraph("3. Report Notes", normal_style))
-    content.append(Paragraph("4. Conclusion", normal_style))
-    content.append(Spacer(1, 18))
+    formulas = get_formula_text()
+    content.append(Paragraph("Scoring Methodology", heading))
+    for item in formulas.values():
+        content.append(Paragraph(f"• {item}", body))
+    content.append(Spacer(1, 12))
 
     if df.empty:
-        content.append(Paragraph("No risk entries available.", normal_style))
+        content.append(Paragraph("No risk entries available.", body))
         doc.build(content, onFirstPage=add_page_header_footer, onLaterPages=add_page_header_footer)
         return file_path
 
-    content.append(Paragraph("1. Executive Summary", heading_style))
-    summary_table_data = [
+    content.append(Paragraph("Executive Summary", heading))
+    summary = [
         ["Metric", "Value"],
-        ["Total Analyses Conducted", str(len(df))],
-        ["Average Risk Score", str(round(df["Risk Score"].mean(), 2))],
-        ["Selected Risk Treatment (Most Recent)", str(df.iloc[-1]["Final Treatment"])],
-        ["Highest Risk Level Observed", str(df["Risk Level"].mode()[0])]
+        ["Total Risks", str(len(df))],
+        ["Average Inherent Risk", str(round(df["Inherent Risk"].mean(), 2))],
+        ["Average Residual Risk", str(round(df["Residual Risk"].mean(), 2))],
+        ["Highest Residual Risk", str(df["Residual Risk"].max())],
+        ["Most Recent Status", str(df.iloc[-1]["Status"])],
     ]
-    content.append(make_pdf_table(summary_table_data, [220, 250]))
-    content.append(Spacer(1, 13))
+    content.append(pdf_table(summary, [220, 250]))
+    content.append(Spacer(1, 14))
 
-    content.append(Paragraph("2. Risk Assessment Entries", heading_style))
+    content.append(Paragraph("Risk Assessment Details", heading))
     for i, row in df.iterrows():
-        content.append(Paragraph(f"Risk Entry {i + 1}", subheading_style))
-        risk_table_data = [
+        content.append(Paragraph(f"Risk Entry {i+1}: {row['Asset']} - {row['Threat']}", subheading))
+
+        risk_data = [
             ["Field", "Value"],
+            ["Company / Unit", str(row["Company / Unit"])],
+            ["Industry", str(row["Industry"])],
+            ["Department", str(row["Department"])],
+            ["Risk Owner", str(row["Risk Owner"])],
             ["Asset", str(row["Asset"])],
             ["Threat", str(row["Threat"])],
             ["Likelihood", str(row["Likelihood"])],
             ["Impact", str(row["Impact"])],
-            ["Risk Score", str(row["Risk Score"])],
-            ["Risk Level", str(row["Risk Level"])],
-            ["Suggested Treatment", str(row["Suggested Treatment"])],
-            ["Final Treatment", str(row["Final Treatment"])],
-            ["NIST Mapping", str(get_nist_mapping(row["Threat"]))]
+            ["Inherent Risk", str(row["Inherent Risk"])],
+            ["Control Effectiveness", f"{row['Control Effectiveness']}%"],
+            ["Residual Risk", str(row["Residual Risk"])],
+            ["Residual Level", str(row["Residual Level"])],
+            ["Treatment", str(row["Final Treatment"])],
+            ["Status", str(row["Status"])],
+            ["Review Date", str(row["Review Date"])],
+            ["NIST Mapping", str(row["NIST Mapping"])],
+            ["RMF Mapping", str(row["RMF Mapping"])],
         ]
-        content.append(make_pdf_table(risk_table_data, [180, 290]))
-        content.append(Spacer(1, 9))
+        content.append(pdf_table(risk_data, [180, 290]))
+        content.append(Spacer(1, 8))
 
-        if row["Risk Score"] >= 15:
-            interpretation = "This represents a high-priority risk requiring prompt remediation and management attention."
-        elif row["Risk Score"] >= 8:
-            interpretation = "This represents a moderate risk that should be addressed within a planned remediation cycle."
-        else:
-            interpretation = "This represents a lower risk that may be accepted or monitored with periodic review."
+        content.append(Paragraph("Business Impact", subheading))
+        content.append(Paragraph(str(row["Business Impact"]), body))
 
-        content.append(Paragraph("Interpretation", subheading_style))
-        content.append(Paragraph(interpretation, normal_style))
-        content.append(Paragraph("Business Impact Summary", subheading_style))
-        content.append(Paragraph(risk_consequence(row["Threat"]), normal_style))
-        content.append(Paragraph("Recommended Control Actions", subheading_style))
-        for recommendation in get_recommendations(row["Threat"]):
-            content.append(Paragraph(f"• {recommendation}", normal_style))
-        content.append(Paragraph("Treatment Follow-up Actions", subheading_style))
-        for action in get_treatment_actions(row["Final Treatment"], int(row["Risk Score"])):
-            content.append(Paragraph(f"• {action}", normal_style))
-        content.append(Spacer(1, 13))
+        content.append(Paragraph("Recommended Controls / Solution", subheading))
+        for rec in str(row["Recommended Controls"]).split(" | "):
+            content.append(Paragraph(f"• {rec}", body))
 
-    content.append(Paragraph("3. Report Notes", heading_style))
+        content.append(Paragraph("Zero Trust Guidance", subheading))
+        for zt in str(row["Zero Trust Guidance"]).split(" | "):
+            content.append(Paragraph(f"• {zt}", body))
+
+        content.append(Paragraph("Next Steps", subheading))
+        for action in str(row["Next Steps"]).split(" | "):
+            content.append(Paragraph(f"• {action}", body))
+
+        content.append(Spacer(1, 14))
+
+    content.append(Paragraph("Conclusion", heading))
     content.append(Paragraph(
-        "This report is generated from user-provided scoring inputs and simplified educational risk logic.",
-        normal_style
-    ))
-    content.append(Paragraph(
-        "It is intended to support learning, demonstration, and early-stage portfolio review rather than replace formal enterprise risk assessments.",
-        note_style
-    ))
-    content.append(Spacer(1, 11))
-
-    content.append(Paragraph("4. Conclusion", heading_style))
-    content.append(Paragraph(
-        "This assessment demonstrates how selected threats can be prioritized, interpreted, and paired with control and treatment decisions using a structured GRC workflow.",
-        normal_style
+        "This report provides a structured evaluation of cybersecurity risk using inherent risk, residual risk, "
+        "control effectiveness, framework mapping, business impact, and recommended actions. It is designed to support "
+        "security governance, risk prioritization, executive reporting, and remediation planning.",
+        body
     ))
 
     doc.build(content, onFirstPage=add_page_header_footer, onLaterPages=add_page_header_footer)
     return file_path
 
+
+def create_heatmap(likelihood, impact):
+    matrix = [[i * j for i in range(1, 6)] for j in range(5, 0, -1)]
+    fig, ax = plt.subplots(figsize=(5, 4))
+    ax.imshow(matrix)
+
+    for y in range(5):
+        for x in range(5):
+            ax.text(x, y, str(matrix[y][x]), ha="center", va="center")
+
+    ax.scatter(likelihood - 1, 5 - impact, s=250, marker="o")
+    ax.set_xticks(range(5))
+    ax.set_xticklabels([1, 2, 3, 4, 5])
+    ax.set_yticks(range(5))
+    ax.set_yticklabels([5, 4, 3, 2, 1])
+    ax.set_xlabel("Likelihood")
+    ax.set_ylabel("Impact")
+    ax.set_title("Risk Heatmap")
+    return fig
+
+
 # ---------------- SIDEBAR ----------------
-st.sidebar.title("🧭 GRC Analyst Console")
-st.sidebar.write("Use this workspace to review cyber risk scenarios, treatment suggestions, and supporting clues.")
+with st.sidebar:
+    st.markdown("## 🛡️ Enterprise Risk Platform")
+    st.caption("NIST CSF • RMF • Zero Trust • Residual Risk")
+    st.divider()
 
-st.sidebar.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
-st.sidebar.markdown("### 🎲 Try Random Scenario")
-if st.sidebar.button("Generate Random Risk"):
-    random_asset = random.choice(ASSET_OPTIONS)
-    st.session_state.selected_asset = random_asset
-    st.session_state.selected_threat = random.choice(ASSET_THREAT_MAP[random_asset])
-    st.rerun()
-st.sidebar.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
+    st.markdown("#### 🎭 Risk Mood Meter")
+    if st.session_state.history:
+        avg = sum(i["Residual Risk"] for i in st.session_state.history) / len(st.session_state.history)
+        lvl, emoji, _ = risk_level(avg)
+        st.write(f"{emoji} Average residual risk: **{round(avg, 1)}** ({lvl})")
+    else:
+        st.write("😌 No risks saved yet")
+    st.markdown("</div>", unsafe_allow_html=True)
 
-st.sidebar.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
-st.sidebar.markdown("### 🎭 Risk Mood Meter")
-avg_score = 0
-if st.session_state.history:
-    avg_score = sum(item["Risk Score"] for item in st.session_state.history) / len(st.session_state.history)
+    st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
+    st.markdown("#### 🎲 Random Scenario")
+    if st.button("Generate random risk", use_container_width=True):
+        random_asset = random.choice(ASSET_OPTIONS)
+        st.session_state.selected_asset = random_asset
+        st.session_state.selected_threat = random.choice(ASSET_THREAT_MAP[random_asset])
+        st.session_state.input_mode = "manual"
+        st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
-if avg_score >= 15:
-    st.sidebar.error("🔥 Current mood: High alert")
-elif avg_score >= 8:
-    st.sidebar.warning("⚠️ Current mood: Watch closely")
-elif avg_score > 0:
-    st.sidebar.success("✅ Current mood: Mostly stable")
-else:
-    st.sidebar.write("😌 Current mood: No analyses yet")
-st.sidebar.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
+    st.markdown("#### 🧠 Tip")
+    st.write(random.choice(TIPS))
+    st.markdown("</div>", unsafe_allow_html=True)
 
-st.sidebar.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
-st.sidebar.markdown("### 🧠 Quick Cyber Tip")
-st.sidebar.write(random.choice(TIPS))
-st.sidebar.markdown("</div>", unsafe_allow_html=True)
-
-st.sidebar.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
-st.sidebar.markdown("### 🎉 Fun Fact")
-st.sidebar.write(random.choice(FUN_FACTS))
-st.sidebar.markdown("</div>", unsafe_allow_html=True)
 
 # ---------------- HEADER ----------------
-st.title("🛡️ GRC Risk Intelligence Platform")
-st.subheader("NIST CSF 2.0 Risk Analysis")
-st.write("Analyze cyber risks using likelihood, impact, uploaded text clues, business impact, treatment suggestions, and actionable recommendations.")
+st.markdown("""
+<div class="hero-box">
+  <h1>🛡️ Enterprise GRC Risk Intelligence Platform</h1>
+  <p>Translate business risk into measurable cybersecurity risk. Assess inherent risk, residual risk, business impact,
+  treatment strategy, framework alignment, and executive-ready reporting.</p>
+</div>
+""", unsafe_allow_html=True)
 
-main_tab, bi_tab = st.tabs(["Risk Assessment", "Power BI Style Dashboard"])
 
+main_tab, dashboard_tab = st.tabs(["📋 Risk Assessment", "📊 Risk Register & Dashboard"])
+
+
+# ---------------- RISK ASSESSMENT ----------------
 with main_tab:
-    st.header("📄 Upload a Document for Risk Clues")
+    col_mode1, col_mode2 = st.columns(2)
+    with col_mode1:
+        if st.button("✨ Smart Mode — describe the risk" + (" ✓" if st.session_state.input_mode == "smart" else ""), use_container_width=True):
+            st.session_state.input_mode = "smart"
+            st.rerun()
+    with col_mode2:
+        if st.button("⚙️ Analyst Mode — use dropdowns" + (" ✓" if st.session_state.input_mode == "manual" else ""), use_container_width=True):
+            st.session_state.input_mode = "manual"
+            st.rerun()
 
-    uploaded_file = st.file_uploader(
-        "Upload a text file (.txt) or CSV file (.csv)",
-        type=["txt", "csv"]
+    st.markdown("---")
+
+    st.subheader("🏢 Enterprise Context")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        company = st.text_input("Company / Business Unit", value="Demo Organization")
+        industry = st.selectbox("Industry", ["General", "Education", "Healthcare", "Finance", "Retail", "Manufacturing", "Technology"])
+    with c2:
+        department = st.text_input("Department", value="Information Technology")
+        owner = st.text_input("Risk Owner", value="Security / IT Team")
+    with c3:
+        status = st.selectbox("Risk Status", ["Open", "In Progress", "Accepted", "Transferred", "Closed"])
+        review_date = st.date_input("Review Date", value=date.today())
+
+    st.markdown("### 🎛️ Control Effectiveness")
+    control_effectiveness = st.slider(
+        "How effective are current controls?",
+        min_value=0,
+        max_value=90,
+        value=30,
+        step=5,
+        help="Higher control effectiveness reduces residual risk. Example: MFA, backups, monitoring, segmentation."
     )
 
-    uploaded_text = ""
-    upload_suggestion = {}
+    st.markdown("---")
 
-    if uploaded_file is not None:
-        if uploaded_file.name.endswith(".txt"):
-            uploaded_text = uploaded_file.read().decode("utf-8", errors="ignore")
-        elif uploaded_file.name.endswith(".csv"):
-            try:
-                temp_df = pd.read_csv(uploaded_file)
-                uploaded_text = " ".join(temp_df.astype(str).fillna("").values.flatten())
-            except Exception:
-                uploaded_text = ""
+    if st.session_state.input_mode == "smart":
+        st.subheader("💬 Describe the Risk")
+        st.caption("Use plain English. Example: 'A vendor that stores our HR data had a breach.'")
 
-        if uploaded_text.strip():
-            sug_asset, sug_threat, sug_likelihood, sug_impact, matched_words = analyze_uploaded_text(uploaded_text)
-            upload_suggestion = {
-                "asset": sug_asset,
-                "threat": sug_threat,
-                "likelihood": sug_likelihood,
-                "impact": sug_impact,
-                "keywords": matched_words
+        ex_cols = st.columns(3)
+        for idx, example in enumerate(EXAMPLE_PROMPTS):
+            with ex_cols[idx % 3]:
+                if st.button(f"📌 {example[:42]}…", key=f"ex_{idx}", use_container_width=True):
+                    st.session_state.smart_description = example
+                    st.rerun()
+
+        description = st.text_area(
+            "Risk Description",
+            value=st.session_state.smart_description,
+            height=120,
+            placeholder="Describe the risk, issue, incident, or concern..."
+        )
+        st.session_state.smart_description = description
+
+        ready = len(description.strip()) > 10
+        if st.button("🚀 Analyze Risk", type="primary", disabled=not ready):
+            parsed = ai_analyze_description(description)
+            fallback_asset, fallback_threat = fallback_detect_from_description(description)
+
+            if parsed is None:
+                asset, threat = fallback_asset, fallback_threat
+                likelihood, impact, reasons = calculate_auto_scores(asset, threat, [])
+                plain_summary = f"This appears to be a {threat.lower()} risk involving the {asset.lower()}."
+                actions = [
+                    {"tag": "Do now", "text": "Contain the issue and limit further exposure."},
+                    {"tag": "This week", "text": "Review relevant controls and determine root cause."},
+                    {"tag": "Document", "text": "Record the risk and track remediation actions."},
+                ]
+                confidence = "medium"
+            else:
+                asset = parsed.get("asset", fallback_asset)
+                threat = parsed.get("threat", fallback_threat)
+                if asset not in ASSET_OPTIONS:
+                    asset = fallback_asset
+                if threat not in THREAT_OPTIONS:
+                    threat = fallback_threat
+                if threat not in ASSET_THREAT_MAP.get(asset, []):
+                    threat = ASSET_THREAT_MAP[asset][0]
+
+                likelihood = max(1, min(5, int(parsed.get("likelihood", 3))))
+                impact = max(1, min(5, int(parsed.get("impact", 3))))
+                reasons = ["Smart Mode used the description to estimate likelihood and impact."]
+                plain_summary = parsed.get("plain_english_summary", "")
+                actions = parsed.get("actions", [])
+                confidence = parsed.get("confidence", "medium")
+
+            inherent, residual = calculate_risks(likelihood, impact, control_effectiveness)
+            inherent_level, inherent_emoji, inherent_color = risk_level(inherent)
+            residual_level, residual_emoji, residual_color = risk_level(residual)
+            treatment, treatment_reason = suggest_treatment(threat, residual)
+
+            impact_text = business_impact(threat, asset, industry)
+            controls = get_recommendations(threat)
+            zt = get_zero_trust_guidance(threat)
+            next_steps = get_treatment_actions(treatment, residual)
+
+            st.session_state.last_result = {
+                "Company / Unit": company,
+                "Industry": industry,
+                "Department": department,
+                "Risk Owner": owner,
+                "Status": status,
+                "Review Date": str(review_date),
+                "Asset": asset,
+                "Threat": threat,
+                "Likelihood": likelihood,
+                "Impact": impact,
+                "Inherent Risk": inherent,
+                "Inherent Level": inherent_level,
+                "Residual Risk": residual,
+                "Residual Level": residual_level,
+                "Residual Emoji": residual_emoji,
+                "Residual Color": residual_color,
+                "Control Effectiveness": control_effectiveness,
+                "Final Treatment": treatment,
+                "Suggested Treatment": treatment,
+                "Treatment Reason": treatment_reason,
+                "Business Impact": impact_text,
+                "Plain English Summary": plain_summary,
+                "AI Actions": actions,
+                "NIST Mapping": get_nist_mapping(threat),
+                "RMF Mapping": get_rmf_mapping(threat),
+                "Zero Trust Guidance": " | ".join(zt),
+                "Recommended Controls": " | ".join(controls),
+                "Next Steps": " | ".join(next_steps),
+                "Confidence": confidence,
+                "Scoring Notes": " | ".join(reasons),
             }
 
-            st.markdown('<div class="section-box">', unsafe_allow_html=True)
-            st.subheader("🔍 Upload-Based Suggestions")
-            if sug_asset:
-                st.write(f"**Suggested Asset:** {sug_asset}")
-            if sug_threat:
-                st.write(f"**Suggested Threat:** {sug_threat}")
-            if sug_likelihood:
-                st.write(f"**Suggested Likelihood:** {sug_likelihood}")
-            if sug_impact:
-                st.write(f"**Suggested Impact:** {sug_impact}")
-            if matched_words:
-                st.write(f"**Matched Keywords:** {', '.join(matched_words)}")
-            st.caption("These are keyword-based clues to support, not replace, analyst judgment.")
-            st.markdown("</div>", unsafe_allow_html=True)
+    else:
+        st.subheader("🧾 Analyst Inputs")
 
-    st.header("🧾 Enter Risk Details")
+        asset = st.selectbox(
+            "Asset",
+            ASSET_OPTIONS,
+            index=ASSET_OPTIONS.index(st.session_state.selected_asset)
+        )
+        st.session_state.selected_asset = asset
 
-    asset = st.selectbox(
-        "Select Asset",
-        ASSET_OPTIONS,
-        index=ASSET_OPTIONS.index(st.session_state.selected_asset),
-        key="asset_live"
-    )
-    st.session_state.selected_asset = asset
+        relevant_threats = ASSET_THREAT_MAP[asset]
+        if st.session_state.selected_threat not in relevant_threats:
+            st.session_state.selected_threat = relevant_threats[0]
 
-    relevant_threats = ASSET_THREAT_MAP[asset]
+        threat = st.selectbox(
+            "Threat",
+            relevant_threats,
+            index=relevant_threats.index(st.session_state.selected_threat)
+        )
+        st.session_state.selected_threat = threat
 
-    if st.session_state.selected_threat not in relevant_threats:
-        st.session_state.selected_threat = relevant_threats[0]
+        likelihood, impact, reasons = calculate_auto_scores(asset, threat, [])
+        m1, m2 = st.columns(2)
+        with m1:
+            st.metric("Auto Likelihood", likelihood)
+        with m2:
+            st.metric("Auto Impact", impact)
 
-    threat = st.selectbox(
-        "Select Threat (Filtered by Asset)",
-        relevant_threats,
-        index=relevant_threats.index(st.session_state.selected_threat),
-        key="threat_live"
-    )
-    st.session_state.selected_threat = threat
+        with st.expander("How scoring was calculated"):
+            for r in reasons:
+                st.write(f"- {r}")
 
-    st.caption("Threat options are dynamically filtered based on the selected asset.")
+        if st.button("🚀 Analyze Risk", type="primary"):
+            inherent, residual = calculate_risks(likelihood, impact, control_effectiveness)
+            inherent_level, inherent_emoji, inherent_color = risk_level(inherent)
+            residual_level, residual_emoji, residual_color = risk_level(residual)
+            treatment, treatment_reason = suggest_treatment(threat, residual)
 
-    st.header("🎯 Risk Scoring")
-    col3, col4 = st.columns(2)
+            impact_text = business_impact(threat, asset, industry)
+            controls = get_recommendations(threat)
+            zt = get_zero_trust_guidance(threat)
+            next_steps = get_treatment_actions(treatment, residual)
 
-    default_likelihood = upload_suggestion.get("likelihood", 3) if upload_suggestion else 3
-    default_impact = upload_suggestion.get("impact", 3) if upload_suggestion else 3
-
-    with col3:
-        likelihood = st.slider("Likelihood (1–5)", 1, 5, default_likelihood, key="likelihood_live")
-
-    with col4:
-        impact = st.slider("Impact (1–5)", 1, 5, default_impact, key="impact_live")
-
-    analyze = st.button("🚀 Analyze Risk")
-
-    if analyze:
-        risk_score = likelihood * impact
-
-        if risk_score >= 15:
-            risk_level = "HIGH"
-            risk_emoji = "🔴"
-            risk_color = "#ff4d4f"
-            business_impact = "High financial and reputational damage."
-            fun_message = "This one needs urgent attention."
-            priority = "🔥 Critical Priority"
-            personality = "🔥 This risk is screaming for attention!"
-        elif risk_score >= 8:
-            risk_level = "MEDIUM"
-            risk_emoji = "🟡"
-            risk_color = "#f59e0b"
-            business_impact = "Moderate operational impact."
-            fun_message = "Worth fixing before it grows into a bigger problem."
-            priority = "⚠️ Moderate Priority"
-            personality = "⚖️ This one is manageable but should not be ignored."
-        else:
-            risk_level = "LOW"
-            risk_emoji = "🟢"
-            risk_color = "#22c55e"
-            business_impact = "Low impact."
-            fun_message = "Not a fire right now, but still worth monitoring."
-            priority = "✅ Low Priority"
-            personality = "😌 Pretty chill risk, just keep an eye on it."
-
-        suggested_treatment, treatment_reason = suggest_treatment(threat, risk_score)
-
-        st.session_state.last_result = {
-            "Asset": asset,
-            "Threat": threat,
-            "Likelihood": likelihood,
-            "Impact": impact,
-            "Risk Score": risk_score,
-            "Risk Level": risk_level,
-            "Risk Emoji": risk_emoji,
-            "Risk Color": risk_color,
-            "Business Impact": business_impact,
-            "Fun Message": fun_message,
-            "Priority": priority,
-            "Personality": personality,
-            "NIST Mapping": get_nist_mapping(threat),
-            "Recommendations": get_recommendations(threat),
-            "Suggested Treatment": suggested_treatment,
-            "Treatment Reason": treatment_reason,
-        }
+            st.session_state.last_result = {
+                "Company / Unit": company,
+                "Industry": industry,
+                "Department": department,
+                "Risk Owner": owner,
+                "Status": status,
+                "Review Date": str(review_date),
+                "Asset": asset,
+                "Threat": threat,
+                "Likelihood": likelihood,
+                "Impact": impact,
+                "Inherent Risk": inherent,
+                "Inherent Level": inherent_level,
+                "Residual Risk": residual,
+                "Residual Level": residual_level,
+                "Residual Emoji": residual_emoji,
+                "Residual Color": residual_color,
+                "Control Effectiveness": control_effectiveness,
+                "Final Treatment": treatment,
+                "Suggested Treatment": treatment,
+                "Treatment Reason": treatment_reason,
+                "Business Impact": impact_text,
+                "Plain English Summary": "",
+                "AI Actions": [],
+                "NIST Mapping": get_nist_mapping(threat),
+                "RMF Mapping": get_rmf_mapping(threat),
+                "Zero Trust Guidance": " | ".join(zt),
+                "Recommended Controls": " | ".join(controls),
+                "Next Steps": " | ".join(next_steps),
+                "Confidence": "high",
+                "Scoring Notes": " | ".join(reasons),
+            }
 
     result = st.session_state.last_result
 
     if result:
-        st.header("📊 Results")
+        st.markdown("---")
+        st.header("📊 Risk Results")
 
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            st.markdown(f"""
-            <div class="card">
-                <h4>Risk Score</h4>
-                <h2>{result['Risk Score']}</h2>
-            </div>
-            """, unsafe_allow_html=True)
-        with c2:
-            st.markdown(f"""
-            <div class="card">
-                <h4>Risk Level</h4>
-                <h2 style="color:{result['Risk Color']} !important;">{result['Risk Emoji']} {result['Risk Level']}</h2>
-            </div>
-            """, unsafe_allow_html=True)
-        with c3:
-            st.markdown(f"""
-            <div class="card">
-                <h4>Asset</h4>
-                <h2>{result['Asset']}</h2>
-            </div>
-            """, unsafe_allow_html=True)
+        card_class = result["Residual Level"].lower()
+        if result["Residual Level"] == "CRITICAL":
+            card_class = "critical"
 
-        st.progress(result["Risk Score"] / 25)
+        r1, r2, r3, r4 = st.columns(4)
+        with r1:
+            st.markdown(f"""<div class="card {card_class}">
+            <h4>Inherent Risk</h4><h2>{result['Inherent Risk']}/25</h2></div>""", unsafe_allow_html=True)
+        with r2:
+            st.markdown(f"""<div class="card {card_class}">
+            <h4>Residual Risk</h4><h2>{result['Residual Risk']}/25</h2></div>""", unsafe_allow_html=True)
+        with r3:
+            st.markdown(f"""<div class="card {card_class}">
+            <h4>Residual Level</h4><h2>{result['Residual Emoji']} {result['Residual Level']}</h2></div>""", unsafe_allow_html=True)
+        with r4:
+            st.markdown(f"""<div class="card">
+            <h4>Treatment</h4><h2 style="font-size:1.35rem!important;">{result['Final Treatment']}</h2></div>""", unsafe_allow_html=True)
 
-        if result["Risk Level"] == "HIGH":
-            st.error(f"⚠️ {result['Fun Message']}")
-        elif result["RiskLevel"] if False else False:
-            pass
-        elif result["Risk Level"] == "MEDIUM":
-            st.warning(f"⚠️ {result['Fun Message']}")
+        if result["Residual Level"] in ["CRITICAL", "HIGH"]:
+            st.error("This risk needs management attention and a clear remediation plan.")
+        elif result["Residual Level"] == "MEDIUM":
+            st.warning("This risk should be tracked and reduced through planned controls.")
         else:
-            st.success(f"✅ {result['Fun Message']}")
+            st.success("This risk appears manageable, but it should still be monitored.")
 
-        st.markdown(f"### {result['Priority']}")
-        st.markdown(f"**Risk Personality:** {result['Personality']}")
-        st.markdown(
-            f"**Quick Summary:** A **{result['Threat'].lower()}** risk against **{result['Asset'].lower()}** currently scores "
-            f"**{result['Risk Score']}/25**, which is **{result['Risk Level'].lower()}** risk."
-        )
+        if result.get("Plain English Summary"):
+            st.markdown(f"""
+            <div class="plain-english-box">
+            <strong>Plain-English Summary:</strong><br>{result["Plain English Summary"]}
+            </div>
+            """, unsafe_allow_html=True)
 
-        col5, col6 = st.columns(2)
+        st.subheader("💼 Business Impact")
+        st.write(result["Business Impact"])
 
-        with col5:
-            st.markdown('<div class="section-box">', unsafe_allow_html=True)
-            st.subheader("🧠 NIST Mapping")
-            st.write(result["NIST Mapping"])
-            st.caption("Relevant NIST CSF 2.0 functions for this threat scenario.")
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        with col6:
-            st.markdown('<div class="section-box">', unsafe_allow_html=True)
-            st.subheader("💼 Business Impact")
-            st.write(result["Business Impact"])
-            st.markdown("**🚨 If ignored:**")
-            st.write(risk_consequence(result["Threat"]))
-            st.caption("Plain-English view of what this could mean for the organization.")
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        st.markdown('<div class="section-box">', unsafe_allow_html=True)
-        st.subheader("🛠 Recommendations")
-        for rec in result["Recommendations"]:
+        st.subheader("✅ Recommended Solution")
+        for rec in result["Recommended Controls"].split(" | "):
             st.write(f"- {rec}")
-        st.markdown("</div>", unsafe_allow_html=True)
 
-        st.markdown('<div class="section-box">', unsafe_allow_html=True)
-        st.subheader("🛡️ Recommended Risk Treatment")
-        st.info(f"💡 Suggested Treatment Strategy: {result['Suggested Treatment']}")
-        st.write(result["Treatment Reason"])
+        st.subheader("🧭 Risk Heatmap")
+        st.pyplot(create_heatmap(result["Likelihood"], result["Impact"]))
 
-        treatment_options = ["Mitigate", "Avoid", "Accept", "Transfer"]
-        default_index = treatment_options.index(result["Suggested Treatment"])
-        final_treatment = st.selectbox(
-            "Change treatment if needed",
+        with st.expander("🧠 Framework Mapping"):
+            st.write(f"**NIST CSF:** {result['NIST Mapping']}")
+            st.write(f"**RMF:** {result['RMF Mapping']}")
+            st.write("**Zero Trust Guidance:**")
+            for item in result["Zero Trust Guidance"].split(" | "):
+                st.write(f"- {item}")
+
+        with st.expander("📌 Treatment Plan"):
+            st.info(f"Suggested treatment: **{result['Final Treatment']}** — {result['Treatment Reason']}")
+            for action in result["Next Steps"].split(" | "):
+                st.write(f"- {action}")
+
+        with st.expander("🧮 Scoring Methodology"):
+            formulas = get_formula_text()
+            for formula in formulas.values():
+                st.write(f"- {formula}")
+            st.write(f"Control Effectiveness Applied: **{result['Control Effectiveness']}%**")
+            st.write(f"Inherent Risk: **{result['Inherent Risk']}**")
+            st.write(f"Residual Risk: **{result['Residual Risk']}**")
+
+        st.subheader("🛡️ Final Risk Treatment Decision")
+        treatment_options = ["Mitigate", "Accept", "Transfer", "Avoid"]
+        selected_treatment = st.selectbox(
+            "Override treatment if needed",
             treatment_options,
-            index=default_index,
-            key="final_treatment_select"
+            index=treatment_options.index(result["Final Treatment"])
         )
+        result["Final Treatment"] = selected_treatment
 
-        st.write(f"**Final Selected Treatment:** {final_treatment}")
-        st.write("**Suggested Next Steps:**")
-        for action in get_treatment_actions(final_treatment, result["Risk Score"]):
-            st.write(f"- {action}")
-        st.markdown("</div>", unsafe_allow_html=True)
+        if st.button("💾 Save to Risk Register", type="primary"):
+            st.session_state.history.append(result.copy())
+            st.success("Saved to risk register.")
+            st.balloons()
 
-        st.markdown('<div class="section-box">', unsafe_allow_html=True)
-        st.subheader("🎮 What if the risk changes over time?")
-        sim_likelihood = st.slider("Simulated Likelihood", 1, 5, result["Likelihood"], key="sim_l")
-        sim_impact = st.slider("Simulated Impact", 1, 5, result["Impact"], key="sim_i")
-        sim_score = sim_likelihood * sim_impact
-        st.write(f"🔮 Simulated Risk Score: **{sim_score}**")
-        st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("---")
+        st.subheader("📖 Glossary")
+        for term, definition in GLOSSARY.items():
+            with st.expander(term):
+                st.write(definition)
 
-        with st.expander("🎉 Why did I get this result?"):
-            st.write(f"- Likelihood = **{result['Likelihood']}**")
-            st.write(f"- Impact = **{result['Impact']}**")
-            st.write(f"- Risk Score = **{result['Likelihood']} × {result['Impact']} = {result['Risk Score']}**")
-            st.write(f"- This puts the result in the **{result['Risk Level']}** category.")
-            st.write("- The treatment suggestion is based on simplified educational risk logic.")
-            st.write("- Threat options are filtered by asset to keep the assessment realistic.")
 
-        if st.button("💾 Save Analysis"):
-            st.session_state.history.append({
-                "Asset": result["Asset"],
-                "Threat": result["Threat"],
-                "Likelihood": result["Likelihood"],
-                "Impact": result["Impact"],
-                "Risk Score": result["Risk Score"],
-                "Risk Level": result["Risk Level"],
-                "Suggested Treatment": result["Suggested Treatment"],
-                "Final Treatment": final_treatment
-            })
-            st.success("Analysis saved to Risk History.")
+# ---------------- DASHBOARD ----------------
+with dashboard_tab:
+    st.header("📊 Risk Register & Dashboard")
 
-with bi_tab:
-    st.header("📊 Power BI Style Dashboard")
-
-    if st.session_state.history:
+    if not st.session_state.history:
+        st.info("No risks saved yet. Save at least one risk assessment to populate the dashboard.")
+    else:
         df = pd.DataFrame(st.session_state.history)
 
         k1, k2, k3, k4 = st.columns(4)
         with k1:
-            st.metric("Total Analyses", len(df))
+            st.metric("Total Risks", len(df))
         with k2:
-            st.metric("Average Risk Score", round(df["Risk Score"].mean(), 1))
+            st.metric("Avg Residual Risk", round(df["Residual Risk"].mean(), 1))
         with k3:
-            st.metric("Most Recent Treatment", df.iloc[-1]["Final Treatment"])
+            st.metric("Highest Residual Risk", int(df["Residual Risk"].max()))
         with k4:
-            st.metric("Highest Risk Score", int(df["Risk Score"].max()))
+            st.metric("Open Risks", int((df["Status"] != "Closed").sum()))
 
-        st.markdown("### Risk History Table")
+        st.subheader("Risk Register")
         st.dataframe(df, use_container_width=True)
 
-        dashboard_view = st.selectbox(
-            "Choose Dashboard View",
-            ["Bar Chart", "Pie Chart", "Both", "Table Only"],
-            key="dashboard_view_select"
-        )
+        st.subheader("Visual Dashboard")
+        c1, c2 = st.columns(2)
+        with c1:
+            st.write("Residual Risk by Level")
+            st.bar_chart(df["Residual Level"].value_counts())
+        with c2:
+            st.write("Risk Treatment Distribution")
+            st.bar_chart(df["Final Treatment"].value_counts())
 
-        risk_counts = df["Risk Level"].value_counts()
-        treatment_counts = df["Final Treatment"].value_counts()
+        st.write("Residual Risk Trend")
+        st.bar_chart(df["Residual Risk"])
 
-        if dashboard_view in ["Bar Chart", "Both"]:
-            st.markdown("### 📈 Bar Chart View")
-            chart_col1, chart_col2 = st.columns(2)
+        clean_csv_columns = [
+            "Company / Unit",
+            "Industry",
+            "Department",
+            "Risk Owner",
+            "Status",
+            "Review Date",
+            "Asset",
+            "Threat",
+            "Likelihood",
+            "Impact",
+            "Inherent Risk",
+            "Inherent Level",
+            "Control Effectiveness",
+            "Residual Risk",
+            "Residual Level",
+            "Final Treatment",
+            "Business Impact",
+            "NIST Mapping",
+            "RMF Mapping",
+            "Recommended Controls",
+            "Next Steps"
+        ]
 
-            with chart_col1:
-                st.markdown("**Risk Level Distribution**")
-                st.bar_chart(risk_counts)
+        clean_df = df[clean_csv_columns]
+        csv_data = clean_df.to_csv(index=False)
 
-            with chart_col2:
-                st.markdown("**Treatment Distribution**")
-                st.bar_chart(treatment_counts)
+        d1, d2, d3 = st.columns(3)
 
-            st.markdown("**Risk Score Trend**")
-            st.bar_chart(df["Risk Score"])
-
-        if dashboard_view in ["Pie Chart", "Both"]:
-            st.markdown("### 🥧 Pie Chart View")
-            chart_col3, chart_col4 = st.columns(2)
-
-            with chart_col3:
-                fig1, ax1 = plt.subplots(figsize=(4, 4))
-                ax1.pie(
-                    risk_counts,
-                    labels=risk_counts.index,
-                    autopct="%1.1f%%",
-                    startangle=90
-                )
-                ax1.set_title("Risk Level Distribution")
-                ax1.axis("equal")
-                st.pyplot(fig1)
-
-            with chart_col4:
-                fig2, ax2 = plt.subplots(figsize=(4, 4))
-                ax2.pie(
-                    treatment_counts,
-                    labels=treatment_counts.index,
-                    autopct="%1.1f%%",
-                    startangle=90
-                )
-                ax2.set_title("Treatment Distribution")
-                ax2.axis("equal")
-                st.pyplot(fig2)
-
-        if dashboard_view == "Table Only":
-            st.info("Table-only view selected. Use the metrics and risk history table for review.")
-
-        csv_data = df.to_csv(index=False)
-        st.download_button(
-            label="📥 Download CSV Risk Report",
-            data=csv_data,
-            file_name="risk_report.csv",
-            mime="text/csv"
-        )
-
-        professional_report = generate_professional_report(df)
-        st.download_button(
-            label="📄 Download Professional Text Report",
-            data=professional_report,
-            file_name="grc_risk_assessment_report.txt",
-            mime="text/plain"
-        )
-
-        pdf_file = generate_pdf_report(df)
-        with open(pdf_file, "rb") as f:
+        with d1:
+            st.caption("Clean CSV structured for Excel, Power BI, and enterprise risk register review.")
             st.download_button(
-                label="🧾 Download Professional PDF Report",
-                data=f,
-                file_name="grc_risk_report.pdf",
-                mime="application/pdf"
+                "📥 Download Clean Risk Register CSV",
+                csv_data,
+                "enterprise_risk_register.csv",
+                "text/csv"
             )
 
-        if st.button("🗑️ Clear History", key="clear_history_button"):
+        with d2:
+            txt = generate_professional_report(df)
+            st.download_button(
+                "📄 Download Professional Text Report",
+                txt,
+                "enterprise_grc_report.txt",
+                "text/plain"
+            )
+
+        with d3:
+            pdf = generate_pdf_report(df)
+            with open(pdf, "rb") as f:
+                st.download_button(
+                    "🧾 Download Professional PDF",
+                    f,
+                    "enterprise_grc_risk_report.pdf",
+                    "application/pdf"
+                )
+
+        if st.button("🗑️ Clear Risk Register"):
             st.session_state.history = []
             st.rerun()
-    else:
-        st.info("No history yet. Save at least one analysis from the Risk Assessment tab to populate the dashboard.")
+
 
 # ---------------- FOOTER ----------------
 st.markdown("---")
 st.markdown(f"""
-<div style="text-align:center; font-size:14px; color:#8b949e;">
-Built by <b>Saloni Bhosale</b> | GRC & Cybersecurity Risk
-<br>Aligned with NIST CSF 2.0 | Interactive Risk Intelligence Platform
-<br>Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+<div style="text-align:center; font-size:13px; color:#64748b; padding-bottom:1rem;">
+Built by <b>Saloni Bhosale</b> | Enterprise GRC & Cybersecurity Risk<br>
+Aligned with NIST CSF 2.0, RMF, Zero Trust, Inherent Risk, Residual Risk, and Control Effectiveness<br>
+Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 </div>
 """, unsafe_allow_html=True)
