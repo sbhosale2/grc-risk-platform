@@ -2,6 +2,7 @@
 import json
 import random
 from datetime import datetime, date
+from tempfile import NamedTemporaryFile
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -16,7 +17,7 @@ from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle, Image
 
 
 # ---------------- PAGE SETUP ----------------
@@ -264,6 +265,57 @@ def risk_level(score: int):
     return "LOW", "🟢", "#22c55e"
 
 
+
+def get_priority_flag(residual_score: int):
+    if residual_score >= 20:
+        return "Immediate", "Executive attention required. Treat as a critical priority."
+    if residual_score >= 13:
+        return "Immediate", "High-priority remediation should begin as soon as possible."
+    if residual_score >= 7:
+        return "Planned", "Address through a planned remediation cycle with assigned ownership."
+    return "Monitor", "Continue monitoring and review periodically."
+
+
+def get_maturity_hint(threat: str, asset: str, control_effectiveness: int):
+    if control_effectiveness < 30:
+        maturity_level = "low control maturity"
+    elif control_effectiveness < 60:
+        maturity_level = "moderate control maturity"
+    else:
+        maturity_level = "stronger control maturity"
+
+    hints = {
+        "Phishing": "This risk pattern is common in organizations that need stronger user awareness, email filtering, and phishing-resistant MFA.",
+        "Credential Attack": "This risk pattern is common in environments without centralized identity governance, strong MFA, and abnormal login monitoring.",
+        "Data Breach": "This risk pattern is common when sensitive data is not fully protected through encryption, access reviews, monitoring, and data classification.",
+        "Unauthorized Access": "This risk pattern is common when access permissions are broad, stale accounts remain active, or identity controls are not continuously reviewed.",
+        "Malware": "This risk pattern is common when endpoint protection, patching, least privilege, and device monitoring need improvement.",
+        "Ransomware": "This risk pattern is common when backup recovery, segmentation, patching, and incident response readiness need improvement.",
+        "Misconfiguration": "This risk pattern is common when configuration baselines, cloud security reviews, and automated compliance checks are not mature.",
+        "Supply Chain Attack": "This risk pattern is common when vendor access, contracts, security reviews, and third-party monitoring are not consistently governed.",
+        "Denial of Service (DDoS)": "This risk pattern is common when resilience planning, traffic filtering, rate limiting, and failover controls need improvement.",
+        "Data Loss": "This risk pattern is common when backup testing, versioning, retention controls, and recovery ownership are not clearly defined.",
+        "Privilege Escalation": "This risk pattern is common when privileged access is not tightly controlled, monitored, and reviewed.",
+        "API Abuse": "This risk pattern is common when APIs lack strong authentication, rate limiting, token governance, and behavioral monitoring.",
+    }
+
+    base_hint = hints.get(
+        threat,
+        "This risk pattern suggests an opportunity to strengthen governance, monitoring, and control ownership."
+    )
+
+    return f"{base_hint} Based on the selected control effectiveness, this scenario currently reflects {maturity_level} for the affected {asset.lower()}."
+
+
+def create_heatmap_image(likelihood, impact):
+    fig = create_heatmap(likelihood, impact)
+    temp = NamedTemporaryFile(delete=False, suffix=".png")
+    fig.savefig(temp.name, bbox_inches="tight", dpi=160)
+    plt.close(fig)
+    return temp.name
+
+
+
 def get_formula_text():
     return {
         "inherent": "Inherent Risk = Likelihood × Impact",
@@ -271,6 +323,16 @@ def get_formula_text():
         "control": "Control Effectiveness is rated from 0% to 90% based on how strong existing controls are.",
         "scale": "Likelihood and Impact are scored from 1 to 5."
     }
+
+
+def get_assumptions_limitations():
+    return [
+        "This platform is designed as a cybersecurity risk decision-support tool, not a replacement for formal audit, legal, or compliance review.",
+        "Risk scoring is based on structured rule-based logic, selected inputs, control effectiveness, and framework-informed mappings.",
+        "Final risk acceptance, remediation, or transfer decisions should be reviewed by security, compliance, IT, and business stakeholders.",
+        "Smart Mode may assist with interpretation, but analyst validation is recommended for high-impact or regulated environments.",
+        "Risk scores should be reviewed periodically because business context, threat activity, controls, and regulatory requirements may change."
+    ]
 
 
 def calculate_auto_scores(asset, threat, matched_words=None):
@@ -547,6 +609,8 @@ def generate_professional_report(df):
     report.append("ENTERPRISE GRC RISK ASSESSMENT REPORT")
     report.append("=" * 70)
     report.append(f"Generated On: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}")
+    report.append("Report Type: Enterprise GRC Risk Assessment")
+    report.append("File Format: Plain Text Report (.txt)")
     report.append("Framework Alignment: NIST CSF 2.0 | RMF | Zero Trust")
     report.append("Prepared By: Saloni Bhosale")
     report.append("=" * 70)
@@ -573,8 +637,14 @@ def generate_professional_report(df):
     report.append("Control Effectiveness represents how much existing controls reduce risk.")
     report.append("")
 
+    report.append("3. ASSUMPTIONS & LIMITATIONS")
+    report.append("-" * 70)
+    for item in get_assumptions_limitations():
+        report.append(f"- {item}")
+    report.append("")
+
     for i, row in df.iterrows():
-        report.append(f"3.{i + 1} RISK ASSESSMENT ENTRY")
+        report.append(f"4.{i + 1} RISK ASSESSMENT ENTRY")
         report.append("-" * 70)
 
         report.append("Business Context")
@@ -594,10 +664,16 @@ def generate_professional_report(df):
         report.append(f"Inherent Risk: {row['Inherent Risk']} / 25 ({row['Inherent Level']})")
         report.append(f"Control Effectiveness: {row['Control Effectiveness']}%")
         report.append(f"Residual Risk: {row['Residual Risk']} / 25 ({row['Residual Level']})")
+        report.append(f"Priority: {row.get('Priority', 'Planned')}")
+        report.append(f"Priority Rationale: {row.get('Priority Rationale', 'Address through an appropriate remediation cycle.')}")
         report.append("")
 
         report.append("Business Impact")
         report.append(str(row["Business Impact"]))
+        report.append("")
+
+        report.append("Trend / Maturity Insight")
+        report.append(str(row.get("Maturity Hint", "This risk pattern highlights an opportunity to improve control maturity and governance.")))
         report.append("")
 
         report.append("Recommended Solution / Controls")
@@ -621,7 +697,7 @@ def generate_professional_report(df):
             report.append(f"- {item}")
         report.append("")
 
-    report.append("4. CONCLUSION")
+    report.append("5. CONCLUSION")
     report.append("-" * 70)
     report.append(
         "This report provides a structured cybersecurity risk assessment using business context, "
@@ -657,6 +733,8 @@ def generate_pdf_report(df):
         Paragraph("Enterprise GRC Risk Assessment Report", title),
         Spacer(1, 8),
         Paragraph("Cybersecurity Risk Intelligence Platform", subtitle),
+        Paragraph("Report Type: Enterprise GRC Risk Assessment", subtitle),
+        Paragraph("File Format: Professional PDF Report (.pdf)", subtitle),
         Paragraph("Aligned with NIST CSF • RMF • Zero Trust", subtitle),
         Spacer(1, 12),
         Paragraph(f"Generated On: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", subtitle),
@@ -667,6 +745,9 @@ def generate_pdf_report(df):
     formulas = get_formula_text()
     content.append(Paragraph("Scoring Methodology", heading))
     for item in formulas.values():
+        content.append(Paragraph(f"• {item}", body))
+    content.append(Paragraph("Assumptions and Limitations", heading))
+    for item in get_assumptions_limitations():
         content.append(Paragraph(f"• {item}", body))
     content.append(Spacer(1, 12))
 
@@ -694,6 +775,7 @@ def generate_pdf_report(df):
         risk_data = [
             ["Field", "Value"],
             ["Company / Unit", str(row["Company / Unit"])],
+            ["Report Type", str(row.get("Report Type", "Enterprise GRC Risk Assessment"))],
             ["Industry", str(row["Industry"])],
             ["Department", str(row["Department"])],
             ["Risk Owner", str(row["Risk Owner"])],
@@ -705,6 +787,7 @@ def generate_pdf_report(df):
             ["Control Effectiveness", f"{row['Control Effectiveness']}%"],
             ["Residual Risk", str(row["Residual Risk"])],
             ["Residual Level", str(row["Residual Level"])],
+            ["Priority", str(row.get("Priority", "Planned"))],
             ["Treatment", str(row["Final Treatment"])],
             ["Status", str(row["Status"])],
             ["Review Date", str(row["Review Date"])],
@@ -716,6 +799,15 @@ def generate_pdf_report(df):
 
         content.append(Paragraph("Business Impact", subheading))
         content.append(Paragraph(str(row["Business Impact"]), body))
+
+        content.append(Paragraph("Priority and Maturity Insight", subheading))
+        content.append(Paragraph(f"Priority: {str(row.get('Priority', 'Planned'))}. {str(row.get('Priority Rationale', 'Address through an appropriate remediation cycle.'))}", body))
+        content.append(Paragraph(str(row.get("Maturity Hint", "This risk pattern highlights an opportunity to improve control maturity and governance.")), body))
+
+        content.append(Paragraph("Risk Heatmap", subheading))
+        heatmap_path = create_heatmap_image(int(row["Likelihood"]), int(row["Impact"]))
+        content.append(Image(heatmap_path, width=260, height=200))
+        content.append(Spacer(1, 8))
 
         content.append(Paragraph("Recommended Controls / Solution", subheading))
         for rec in str(row["Recommended Controls"]).split(" | "):
@@ -873,7 +965,7 @@ with main_tab:
             if parsed is None:
                 asset, threat = fallback_asset, fallback_threat
                 likelihood, impact, reasons = calculate_auto_scores(asset, threat, [])
-                plain_summary = f"This appears to be a {threat.lower()} risk involving the {asset.lower()}."
+                plain_summary = f"The assessment indicates a {threat.lower()} risk affecting the {asset.lower()}."
                 actions = [
                     {"tag": "Do now", "text": "Contain the issue and limit further exposure."},
                     {"tag": "This week", "text": "Review relevant controls and determine root cause."},
@@ -909,6 +1001,7 @@ with main_tab:
 
             st.session_state.last_result = {
                 "Company / Unit": company,
+                "Report Type": "Enterprise GRC Risk Assessment",
                 "Industry": industry,
                 "Department": department,
                 "Risk Owner": owner,
@@ -937,6 +1030,9 @@ with main_tab:
                 "Recommended Controls": " | ".join(controls),
                 "Next Steps": " | ".join(next_steps),
                 "Confidence": confidence,
+                "Priority": get_priority_flag(residual)[0],
+                "Priority Rationale": get_priority_flag(residual)[1],
+                "Maturity Hint": get_maturity_hint(threat, asset, control_effectiveness),
                 "Scoring Notes": " | ".join(reasons),
             }
 
@@ -985,6 +1081,7 @@ with main_tab:
 
             st.session_state.last_result = {
                 "Company / Unit": company,
+                "Report Type": "Enterprise GRC Risk Assessment",
                 "Industry": industry,
                 "Department": department,
                 "Risk Owner": owner,
@@ -1013,6 +1110,9 @@ with main_tab:
                 "Recommended Controls": " | ".join(controls),
                 "Next Steps": " | ".join(next_steps),
                 "Confidence": "high",
+                "Priority": get_priority_flag(residual)[0],
+                "Priority Rationale": get_priority_flag(residual)[1],
+                "Maturity Hint": get_maturity_hint(threat, asset, control_effectiveness),
                 "Scoring Notes": " | ".join(reasons),
             }
 
@@ -1056,6 +1156,12 @@ with main_tab:
 
         st.subheader("💼 Business Impact")
         st.write(result["Business Impact"])
+
+        st.subheader("🚦 Priority Flag")
+        st.info(f"**Priority:** {result.get('Priority', 'Planned')} — {result.get('Priority Rationale', 'Address through an appropriate remediation cycle.')}")
+
+        st.subheader("📈 Trend / Maturity Insight")
+        st.write(result.get("Maturity Hint", "This risk pattern highlights an opportunity to improve control maturity and governance."))
 
         st.subheader("✅ Recommended Solution")
         for rec in result["Recommended Controls"].split(" | "):
@@ -1141,6 +1247,7 @@ with dashboard_tab:
 
         clean_csv_columns = [
             "Company / Unit",
+            "Report Type",
             "Industry",
             "Department",
             "Risk Owner",
@@ -1155,6 +1262,9 @@ with dashboard_tab:
             "Control Effectiveness",
             "Residual Risk",
             "Residual Level",
+            "Priority",
+            "Priority Rationale",
+            "Maturity Hint",
             "Final Treatment",
             "Business Impact",
             "NIST Mapping",
@@ -1163,8 +1273,19 @@ with dashboard_tab:
             "Next Steps"
         ]
 
-        clean_df = df[clean_csv_columns]
+        df_for_export = df.copy()
+        df_for_export["CSV File Type"] = "Enterprise Risk Register CSV"
+        df_for_export["Assumptions & Limitations"] = " | ".join(get_assumptions_limitations())
+
+        clean_csv_columns_with_metadata = clean_csv_columns + [
+            "CSV File Type",
+            "Assumptions & Limitations"
+        ]
+
+        clean_df = df_for_export[clean_csv_columns_with_metadata]
         csv_data = clean_df.to_csv(index=False)
+
+        st.caption("Exports include report type, file type, assumptions, and limitations for enterprise review.")
 
         d1, d2, d3 = st.columns(3)
 
