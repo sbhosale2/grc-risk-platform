@@ -78,40 +78,12 @@ st.markdown("""
     color: #78350f;
 }
 
-.action-tag {
-    display: inline-block;
-    font-size: 0.72rem;
-    font-weight: 700;
-    padding: 3px 9px;
-    border-radius: 20px;
-    margin-right: 8px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-.tag-now   { background: #fee2e2; color: #991b1b; }
-.tag-week  { background: #fef3c7; color: #92400e; }
-.tag-doc   { background: #dbeafe; color: #1e40af; }
-
 .sidebar-card {
     background: #f8fafc;
     padding: 12px 14px;
     border-radius: 12px;
     border: 1px solid #e2e8f0;
     margin-bottom: 12px;
-}
-
-.step-label {
-    font-size: 0.78rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: #64748b;
-    margin-bottom: 6px;
-}
-
-.small-muted {
-    color: #64748b;
-    font-size: 0.88rem;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -125,7 +97,6 @@ defaults = {
     "selected_threat": "Data Breach",
     "smart_description": "",
     "input_mode": "smart",
-    "ai_detected": None,
 }
 for key, value in defaults.items():
     if key not in st.session_state:
@@ -221,8 +192,6 @@ ASSET_THREAT_SCORES = {
     ("Vendor / Third Party", "Data Breach"): (3, 5),
     ("Network", "Denial of Service (DDoS)"): (4, 5),
     ("Network", "Misconfiguration"): (4, 4),
-    ("HVAC / Building Management System", "Unauthorized Access"): (3, 3),
-    ("HVAC / Building Management System", "Misconfiguration"): (3, 3),
     ("OT / Industrial System", "Ransomware"): (3, 5),
     ("OT / Industrial System", "Malware"): (3, 5),
 }
@@ -237,20 +206,19 @@ EXAMPLE_PROMPTS = [
 ]
 
 TIPS = [
-    "Risk is not just technical. It affects operations, trust, money, and compliance.",
-    "Residual risk helps companies understand what remains after controls are applied.",
-    "A good risk register should include owner, status, treatment, and review date.",
-    "Zero Trust means verifying every user, device, and request continuously.",
+    "Risk becomes more useful when it is linked to an owner, evidence, control, and review date.",
+    "Vulnerabilities should be connected to business risk, not viewed only as technical findings.",
+    "Residual risk helps explain what remains after controls are applied.",
+    "Evidence upload and audit status make the tool closer to a real GRC workflow.",
 ]
 
 GLOSSARY = {
-    "Inherent Risk": "The risk before considering the effectiveness of existing controls.",
-    "Residual Risk": "The remaining risk after existing controls reduce exposure.",
-    "Control Effectiveness": "How well current safeguards reduce the likelihood or impact of a risk.",
-    "NIST CSF": "A cybersecurity framework used to organize cybersecurity activities around Govern, Identify, Protect, Detect, Respond, and Recover.",
-    "RMF": "Risk Management Framework — a structured process for managing security and privacy risk.",
-    "Zero Trust": "A security model based on verify explicitly, least privilege, and assume breach.",
-    "Risk Treatment": "The decision to Mitigate, Accept, Transfer, or Avoid a risk.",
+    "Risk Formula": "Risk Score = (Likelihood × Impact × Asset Value) ÷ Control Effectiveness.",
+    "Asset Value": "How important the asset is to the organization, scored 1 to 5.",
+    "Control Effectiveness": "How strong current controls are, scored 1 to 5. Stronger controls reduce risk.",
+    "Evidence": "Proof used for audit or risk validation, such as scan output, screenshots, tickets, policies, or logs.",
+    "Nessus": "A vulnerability scanning tool. Scan results can be linked to risks for better prioritization.",
+    "Splunk": "A SIEM/log analytics platform. Alerts and logs can provide supporting evidence for risks.",
 }
 
 
@@ -265,73 +233,22 @@ def risk_level(score: int):
     return "LOW", "🟢", "#22c55e"
 
 
-
-def get_priority_flag(residual_score: int):
-    if residual_score >= 20:
-        return "Immediate", "Executive attention required. Treat as a critical priority."
-    if residual_score >= 13:
-        return "Immediate", "High-priority remediation should begin as soon as possible."
-    if residual_score >= 7:
-        return "Planned", "Address through a planned remediation cycle with assigned ownership."
-    return "Monitor", "Continue monitoring and review periodically."
-
-
-def get_maturity_hint(threat: str, asset: str, control_effectiveness: int):
-    if control_effectiveness < 30:
-        maturity_level = "low control maturity"
-    elif control_effectiveness < 60:
-        maturity_level = "moderate control maturity"
-    else:
-        maturity_level = "stronger control maturity"
-
-    hints = {
-        "Phishing": "This risk pattern is common in organizations that need stronger user awareness, email filtering, and phishing-resistant MFA.",
-        "Credential Attack": "This risk pattern is common in environments without centralized identity governance, strong MFA, and abnormal login monitoring.",
-        "Data Breach": "This risk pattern is common when sensitive data is not fully protected through encryption, access reviews, monitoring, and data classification.",
-        "Unauthorized Access": "This risk pattern is common when access permissions are broad, stale accounts remain active, or identity controls are not continuously reviewed.",
-        "Malware": "This risk pattern is common when endpoint protection, patching, least privilege, and device monitoring need improvement.",
-        "Ransomware": "This risk pattern is common when backup recovery, segmentation, patching, and incident response readiness need improvement.",
-        "Misconfiguration": "This risk pattern is common when configuration baselines, cloud security reviews, and automated compliance checks are not mature.",
-        "Supply Chain Attack": "This risk pattern is common when vendor access, contracts, security reviews, and third-party monitoring are not consistently governed.",
-        "Denial of Service (DDoS)": "This risk pattern is common when resilience planning, traffic filtering, rate limiting, and failover controls need improvement.",
-        "Data Loss": "This risk pattern is common when backup testing, versioning, retention controls, and recovery ownership are not clearly defined.",
-        "Privilege Escalation": "This risk pattern is common when privileged access is not tightly controlled, monitored, and reviewed.",
-        "API Abuse": "This risk pattern is common when APIs lack strong authentication, rate limiting, token governance, and behavioral monitoring.",
-    }
-
-    base_hint = hints.get(
-        threat,
-        "This risk pattern suggests an opportunity to strengthen governance, monitoring, and control ownership."
-    )
-
-    return f"{base_hint} Based on the selected control effectiveness, this scenario currently reflects {maturity_level} for the affected {asset.lower()}."
-
-
-def create_heatmap_image(likelihood, impact):
-    fig = create_heatmap(likelihood, impact)
-    temp = NamedTemporaryFile(delete=False, suffix=".png")
-    fig.savefig(temp.name, bbox_inches="tight", dpi=160)
-    plt.close(fig)
-    return temp.name
-
-
-
 def get_formula_text():
     return {
-        "inherent": "Inherent Risk = Likelihood × Impact",
-        "residual": "Residual Risk = Inherent Risk × (1 - Control Effectiveness)",
-        "control": "Control Effectiveness is rated from 0% to 90% based on how strong existing controls are.",
-        "scale": "Likelihood and Impact are scored from 1 to 5."
+        "risk_formula": "Risk Score = (Likelihood × Impact × Asset Value) ÷ Control Effectiveness",
+        "scale": "Likelihood, Impact, Asset Value, and Control Effectiveness are scored from 1 to 5.",
+        "control": "Higher control effectiveness lowers the final normalized risk score.",
+        "workflow": "Each risk can be linked to vulnerabilities, evidence, controls, audit status, and frameworks."
     }
 
 
 def get_assumptions_limitations():
     return [
-        "This platform is designed as a cybersecurity risk decision-support tool, not a replacement for formal audit, legal, or compliance review.",
-        "Risk scoring is based on structured rule-based logic, selected inputs, control effectiveness, and framework-informed mappings.",
-        "Final risk acceptance, remediation, or transfer decisions should be reviewed by security, compliance, IT, and business stakeholders.",
-        "Smart Mode may assist with interpretation, but analyst validation is recommended for high-impact or regulated environments.",
-        "Risk scores should be reviewed periodically because business context, threat activity, controls, and regulatory requirements may change."
+        "This platform is a decision-support tool and does not replace formal audit, legal, or compliance review.",
+        "Risk scoring is based on selected inputs, rule-based logic, asset value, and control effectiveness.",
+        "Final decisions should be reviewed by security, compliance, IT, and business stakeholders.",
+        "Smart Mode and fallback mapping should be validated for high-impact or regulated environments.",
+        "Risk scores should be reviewed periodically as threats, assets, controls, and regulations change."
     ]
 
 
@@ -358,11 +275,22 @@ def calculate_auto_scores(asset, threat, matched_words=None):
     return likelihood, impact, reasons
 
 
-def calculate_risks(likelihood, impact, control_effectiveness):
-    inherent = likelihood * impact
-    residual = round(inherent * (1 - control_effectiveness / 100))
-    residual = max(0, residual)
-    return inherent, residual
+def calculate_risks(likelihood, impact, asset_value, control_effectiveness):
+    control_factor = max(1, int(control_effectiveness))
+    raw_score = (likelihood * impact * asset_value) / control_factor
+    normalized_score = round(min(25, max(1, raw_score)))
+    raw_factor = likelihood * impact * asset_value
+    return raw_factor, normalized_score
+
+
+def get_priority_flag(residual_score: int):
+    if residual_score >= 20:
+        return "Immediate", "Executive attention required. Treat as a critical priority."
+    if residual_score >= 13:
+        return "Immediate", "High-priority remediation should begin as soon as possible."
+    if residual_score >= 7:
+        return "Planned", "Address through a planned remediation cycle with assigned ownership."
+    return "Monitor", "Continue monitoring and review periodically."
 
 
 def get_nist_mapping(threat):
@@ -403,6 +331,25 @@ def get_rmf_mapping(threat):
     }.get(threat, "Categorize, Select, Implement, Monitor")
 
 
+def get_iso27001_mapping(threat):
+    return {
+        "Data Breach": "ISO 27001: Access Control, Cryptography, Asset Management, Incident Management",
+        "Unauthorized Access": "ISO 27001: Access Control, Operations Security, Communications Security",
+        "Malware": "ISO 27001: Operations Security, Malware Protection, Incident Management",
+        "Phishing": "ISO 27001: Awareness Training, Access Control, Operations Security",
+        "Misconfiguration": "ISO 27001: Secure Configuration, Change Management, System Acquisition",
+        "Insider Threat": "ISO 27001: HR Security, Access Control, Monitoring, Segregation of Duties",
+        "Ransomware": "ISO 27001: Backup, Incident Management, Business Continuity",
+        "Supply Chain Attack": "ISO 27001: Supplier Relationships, Third-Party Risk, Access Control",
+        "Zero-Day Exploit": "ISO 27001: Vulnerability Management, Incident Response, Security Monitoring",
+        "Denial of Service (DDoS)": "ISO 27001: Communications Security, Business Continuity, Monitoring",
+        "Credential Attack": "ISO 27001: Access Control, Authentication, Monitoring",
+        "Data Loss": "ISO 27001: Backup, Asset Management, Business Continuity",
+        "Privilege Escalation": "ISO 27001: Privileged Access Management, Access Control, Monitoring",
+        "API Abuse": "ISO 27001: Access Control, Communications Security, Secure Development",
+    }.get(threat, "ISO 27001: Policies, Asset Management, Operations Security")
+
+
 def get_zero_trust_guidance(threat):
     return {
         "Data Breach": ["Enforce least-privilege access.", "Encrypt sensitive data.", "Monitor access to critical data stores."],
@@ -414,6 +361,25 @@ def get_zero_trust_guidance(threat):
         "Credential Attack": ["Require MFA.", "Detect abnormal login behavior.", "Apply least privilege."],
         "API Abuse": ["Authenticate every API request.", "Use token validation.", "Monitor API activity."],
     }.get(threat, ["Verify explicitly.", "Use least privilege.", "Assume breach."])
+
+
+def get_control_mapping(threat):
+    return {
+        "Data Breach": ["Data encryption", "DLP monitoring", "Access reviews", "Data classification"],
+        "Unauthorized Access": ["MFA", "RBAC", "Access logging", "Account lifecycle management"],
+        "Malware": ["Endpoint protection", "Patch management", "EDR monitoring", "Application control"],
+        "Phishing": ["Email filtering", "Security awareness", "MFA", "Phishing reporting"],
+        "Misconfiguration": ["Secure configuration baseline", "Cloud posture monitoring", "Change management", "Periodic review"],
+        "Insider Threat": ["Least privilege", "User behavior monitoring", "Separation of duties", "Access recertification"],
+        "Ransomware": ["Immutable backups", "Network segmentation", "EDR", "Incident response testing"],
+        "Supply Chain Attack": ["Vendor risk review", "Contract requirements", "Third-party access control", "Supplier monitoring"],
+        "Zero-Day Exploit": ["Threat intelligence", "Compensating controls", "Segmentation", "Rapid patch process"],
+        "Denial of Service (DDoS)": ["DDoS protection", "Rate limiting", "Failover planning", "Traffic monitoring"],
+        "Credential Attack": ["MFA", "Password policy", "Abnormal login monitoring", "Disable stale accounts"],
+        "Data Loss": ["Backups", "Versioning", "Retention policy", "Recovery testing"],
+        "Privilege Escalation": ["PAM", "Least privilege", "Privilege change monitoring", "Patch management"],
+        "API Abuse": ["API authentication", "Rate limiting", "Token governance", "API monitoring"],
+    }.get(threat, ["Risk review", "Control owner assignment", "Periodic monitoring"])
 
 
 def business_impact(threat, asset, industry):
@@ -487,6 +453,28 @@ def get_treatment_actions(treatment, residual_score):
     if residual_score >= 13:
         base.append("Escalate to leadership or security governance committee.")
     return base
+
+
+def get_audit_recommendation(audit_status):
+    if audit_status == "Evidence Missing":
+        return "Evidence is missing. Request screenshots, logs, tickets, scan output, or policy documentation before audit review."
+    if audit_status == "Needs Review":
+        return "Evidence exists but requires control owner or auditor validation."
+    if audit_status == "Remediation In Progress":
+        return "Track remediation progress, target date, and compensating controls."
+    if audit_status == "Audit Ready":
+        return "Evidence appears ready for audit review. Confirm version, owner, and review date."
+    return "Audit status should be reviewed and updated."
+
+
+def get_maturity_hint(threat, asset, control_effectiveness):
+    if control_effectiveness <= 2:
+        maturity = "low control maturity"
+    elif control_effectiveness == 3:
+        maturity = "moderate control maturity"
+    else:
+        maturity = "stronger control maturity"
+    return f"This risk pattern suggests that the affected {asset.lower()} currently has {maturity}. Strengthening mapped controls and audit evidence can reduce residual risk."
 
 
 def fallback_detect_from_description(description):
@@ -604,6 +592,32 @@ def pdf_table(data, widths):
     return table
 
 
+def create_heatmap(likelihood, impact):
+    matrix = [[i * j for i in range(1, 6)] for j in range(5, 0, -1)]
+    fig, ax = plt.subplots(figsize=(5, 4))
+    ax.imshow(matrix)
+    for y in range(5):
+        for x in range(5):
+            ax.text(x, y, str(matrix[y][x]), ha="center", va="center")
+    ax.scatter(likelihood - 1, 5 - impact, s=250, marker="o")
+    ax.set_xticks(range(5))
+    ax.set_xticklabels([1, 2, 3, 4, 5])
+    ax.set_yticks(range(5))
+    ax.set_yticklabels([5, 4, 3, 2, 1])
+    ax.set_xlabel("Likelihood")
+    ax.set_ylabel("Impact")
+    ax.set_title("Risk Heatmap")
+    return fig
+
+
+def create_heatmap_image(likelihood, impact):
+    fig = create_heatmap(likelihood, impact)
+    temp = NamedTemporaryFile(delete=False, suffix=".png")
+    fig.savefig(temp.name, bbox_inches="tight", dpi=160)
+    plt.close(fig)
+    return temp.name
+
+
 def generate_professional_report(df):
     report = []
     report.append("ENTERPRISE GRC RISK ASSESSMENT REPORT")
@@ -611,7 +625,7 @@ def generate_professional_report(df):
     report.append(f"Generated On: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}")
     report.append("Report Type: Enterprise GRC Risk Assessment")
     report.append("File Format: Plain Text Report (.txt)")
-    report.append("Framework Alignment: NIST CSF 2.0 | RMF | Zero Trust")
+    report.append("Framework Alignment: NIST CSF 2.0 | ISO 27001 | RMF | Zero Trust")
     report.append("Prepared By: Saloni Bhosale")
     report.append("=" * 70)
     report.append("")
@@ -623,7 +637,6 @@ def generate_professional_report(df):
     report.append("1. EXECUTIVE SUMMARY")
     report.append("-" * 70)
     report.append(f"Total Risks Assessed: {len(df)}")
-    report.append(f"Average Inherent Risk Score: {round(df['Inherent Risk'].mean(), 2)} / 25")
     report.append(f"Average Residual Risk Score: {round(df['Residual Risk'].mean(), 2)} / 25")
     report.append(f"Highest Residual Risk Score: {df['Residual Risk'].max()} / 25")
     report.append(f"Open Risks: {(df['Status'] != 'Closed').sum()}")
@@ -631,10 +644,9 @@ def generate_professional_report(df):
 
     report.append("2. SCORING METHODOLOGY")
     report.append("-" * 70)
-    report.append("Inherent Risk = Likelihood x Impact")
-    report.append("Residual Risk = Inherent Risk adjusted by Control Effectiveness")
-    report.append("Likelihood and Impact are scored on a 1 to 5 scale.")
-    report.append("Control Effectiveness represents how much existing controls reduce risk.")
+    report.append("Risk Score = (Likelihood x Impact x Asset Value) / Control Effectiveness")
+    report.append("The calculated score is normalized to a 1 to 25 scale for reporting and prioritization.")
+    report.append("Likelihood, Impact, Asset Value, and Control Effectiveness are scored from 1 to 5.")
     report.append("")
 
     report.append("3. ASSUMPTIONS & LIMITATIONS")
@@ -648,79 +660,65 @@ def generate_professional_report(df):
         report.append("-" * 70)
 
         report.append("Business Context")
-        report.append(f"Company / Unit: {row['Company / Unit']}")
-        report.append(f"Industry: {row['Industry']}")
-        report.append(f"Department: {row['Department']}")
-        report.append(f"Risk Owner: {row['Risk Owner']}")
-        report.append(f"Status: {row['Status']}")
-        report.append(f"Review Date: {row['Review Date']}")
+        for field in ["Company / Unit", "Industry", "Department", "Risk Owner", "Status", "Review Date"]:
+            report.append(f"{field}: {row.get(field, '')}")
         report.append("")
 
         report.append("Risk Overview")
-        report.append(f"Asset: {row['Asset']}")
-        report.append(f"Threat: {row['Threat']}")
-        report.append(f"Likelihood: {row['Likelihood']} / 5")
-        report.append(f"Impact: {row['Impact']} / 5")
-        report.append(f"Inherent Risk: {row['Inherent Risk']} / 25 ({row['Inherent Level']})")
-        report.append(f"Control Effectiveness: {row['Control Effectiveness']}%")
-        report.append(f"Residual Risk: {row['Residual Risk']} / 25 ({row['Residual Level']})")
-        report.append(f"Priority: {row.get('Priority', 'Planned')}")
-        report.append(f"Priority Rationale: {row.get('Priority Rationale', 'Address through an appropriate remediation cycle.')}")
+        for field in ["Asset", "Threat", "Likelihood", "Impact", "Asset Value", "Control Effectiveness", "Raw Risk Factor", "Residual Risk", "Residual Level", "Priority"]:
+            report.append(f"{field}: {row.get(field, '')}")
         report.append("")
 
         report.append("Business Impact")
-        report.append(str(row["Business Impact"]))
+        report.append(str(row.get("Business Impact", "")))
         report.append("")
 
-        report.append("Trend / Maturity Insight")
-        report.append(str(row.get("Maturity Hint", "This risk pattern highlights an opportunity to improve control maturity and governance.")))
-        report.append("")
-
-        report.append("Recommended Solution / Controls")
-        for item in str(row["Recommended Controls"]).split(" | "):
-            report.append(f"- {item}")
+        report.append("Vulnerability, Evidence & Audit Tracking")
+        for field in ["Vulnerability / Finding", "Vulnerability Severity", "Finding Source", "Evidence File", "Evidence Owner", "Audit Status", "Audit Recommendation"]:
+            report.append(f"{field}: {row.get(field, '')}")
         report.append("")
 
         report.append("Framework Mapping")
-        report.append(f"NIST CSF Mapping: {row['NIST Mapping']}")
-        report.append(f"RMF Mapping: {row['RMF Mapping']}")
-        report.append("Zero Trust Guidance:")
-        for item in str(row["Zero Trust Guidance"]).split(" | "):
-            report.append(f"- {item}")
+        report.append(f"NIST CSF Mapping: {row.get('NIST Mapping', '')}")
+        report.append(f"RMF Mapping: {row.get('RMF Mapping', '')}")
+        report.append(f"ISO 27001 Mapping: {row.get('ISO 27001 Mapping', '')}")
+        report.append("Mapped Controls:")
+        for item in str(row.get("Mapped Controls", "")).split(" | "):
+            if item:
+                report.append(f"- {item}")
+        report.append("")
+
+        report.append("Recommended Solution / Controls")
+        for item in str(row.get("Recommended Controls", "")).split(" | "):
+            if item:
+                report.append(f"- {item}")
         report.append("")
 
         report.append("Treatment Plan")
-        report.append(f"Recommended Treatment: {row['Final Treatment']}")
-        report.append(f"Treatment Reason: {row['Treatment Reason']}")
+        report.append(f"Recommended Treatment: {row.get('Final Treatment', '')}")
+        report.append(f"Treatment Reason: {row.get('Treatment Reason', '')}")
         report.append("Next Steps:")
-        for item in str(row["Next Steps"]).split(" | "):
-            report.append(f"- {item}")
+        for item in str(row.get("Next Steps", "")).split(" | "):
+            if item:
+                report.append(f"- {item}")
         report.append("")
 
     report.append("5. CONCLUSION")
     report.append("-" * 70)
     report.append(
-        "This report provides a structured cybersecurity risk assessment using business context, "
-        "risk scoring, control effectiveness, residual risk, framework alignment, and practical remediation guidance."
+        "This report provides a structured cybersecurity risk assessment using vulnerability context, "
+        "asset value, control effectiveness, evidence tracking, audit status, framework alignment, and remediation guidance."
     )
     report.append("")
     report.append("=" * 70)
     report.append("END OF REPORT")
-
     return "\n".join(report)
 
 
 def generate_pdf_report(df):
     file_path = "enterprise_grc_risk_report.pdf"
 
-    doc = SimpleDocTemplate(
-        file_path,
-        pagesize=letter,
-        rightMargin=50,
-        leftMargin=50,
-        topMargin=80,
-        bottomMargin=60
-    )
+    doc = SimpleDocTemplate(file_path, pagesize=letter, rightMargin=50, leftMargin=50, topMargin=80, bottomMargin=60)
 
     styles = getSampleStyleSheet()
     title = ParagraphStyle("Title", parent=styles["Title"], fontName="Helvetica-Bold", fontSize=24, textColor=colors.HexColor("#0B3D91"), alignment=TA_CENTER)
@@ -735,17 +733,18 @@ def generate_pdf_report(df):
         Paragraph("Cybersecurity Risk Intelligence Platform", subtitle),
         Paragraph("Report Type: Enterprise GRC Risk Assessment", subtitle),
         Paragraph("File Format: Professional PDF Report (.pdf)", subtitle),
-        Paragraph("Aligned with NIST CSF • RMF • Zero Trust", subtitle),
+        Paragraph("Aligned with NIST CSF • ISO 27001 • RMF • Zero Trust", subtitle),
         Spacer(1, 12),
         Paragraph(f"Generated On: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", subtitle),
         Paragraph("Prepared By: Saloni Bhosale", subtitle),
         Spacer(1, 20),
     ]
 
-    formulas = get_formula_text()
     content.append(Paragraph("Scoring Methodology", heading))
-    for item in formulas.values():
+    for item in get_formula_text().values():
         content.append(Paragraph(f"• {item}", body))
+    content.append(Spacer(1, 12))
+
     content.append(Paragraph("Assumptions and Limitations", heading))
     for item in get_assumptions_limitations():
         content.append(Paragraph(f"• {item}", body))
@@ -760,10 +759,9 @@ def generate_pdf_report(df):
     summary = [
         ["Metric", "Value"],
         ["Total Risks", str(len(df))],
-        ["Average Inherent Risk", str(round(df["Inherent Risk"].mean(), 2))],
         ["Average Residual Risk", str(round(df["Residual Risk"].mean(), 2))],
         ["Highest Residual Risk", str(df["Residual Risk"].max())],
-        ["Most Recent Status", str(df.iloc[-1]["Status"])],
+        ["Open Risks", str((df["Status"] != "Closed").sum())],
     ]
     content.append(pdf_table(summary, [220, 250]))
     content.append(Spacer(1, 14))
@@ -771,63 +769,68 @@ def generate_pdf_report(df):
     content.append(Paragraph("Risk Assessment Details", heading))
     for i, row in df.iterrows():
         content.append(Paragraph(f"Risk Entry {i+1}: {row['Asset']} - {row['Threat']}", subheading))
-
         risk_data = [
             ["Field", "Value"],
-            ["Company / Unit", str(row["Company / Unit"])],
-            ["Report Type", str(row.get("Report Type", "Enterprise GRC Risk Assessment"))],
-            ["Industry", str(row["Industry"])],
-            ["Department", str(row["Department"])],
-            ["Risk Owner", str(row["Risk Owner"])],
-            ["Asset", str(row["Asset"])],
-            ["Threat", str(row["Threat"])],
-            ["Likelihood", str(row["Likelihood"])],
-            ["Impact", str(row["Impact"])],
-            ["Inherent Risk", str(row["Inherent Risk"])],
-            ["Control Effectiveness", f"{row['Control Effectiveness']}%"],
-            ["Residual Risk", str(row["Residual Risk"])],
-            ["Residual Level", str(row["Residual Level"])],
-            ["Priority", str(row.get("Priority", "Planned"))],
-            ["Treatment", str(row["Final Treatment"])],
-            ["Status", str(row["Status"])],
-            ["Review Date", str(row["Review Date"])],
-            ["NIST Mapping", str(row["NIST Mapping"])],
-            ["RMF Mapping", str(row["RMF Mapping"])],
+            ["Company / Unit", str(row.get("Company / Unit", ""))],
+            ["Industry", str(row.get("Industry", ""))],
+            ["Department", str(row.get("Department", ""))],
+            ["Risk Owner", str(row.get("Risk Owner", ""))],
+            ["Asset", str(row.get("Asset", ""))],
+            ["Threat", str(row.get("Threat", ""))],
+            ["Likelihood", str(row.get("Likelihood", ""))],
+            ["Impact", str(row.get("Impact", ""))],
+            ["Asset Value", str(row.get("Asset Value", ""))],
+            ["Control Effectiveness", str(row.get("Control Effectiveness", ""))],
+            ["Raw Risk Factor", str(row.get("Raw Risk Factor", ""))],
+            ["Residual Risk", str(row.get("Residual Risk", ""))],
+            ["Residual Level", str(row.get("Residual Level", ""))],
+            ["Priority", str(row.get("Priority", ""))],
+            ["Treatment", str(row.get("Final Treatment", ""))],
+            ["Status", str(row.get("Status", ""))],
+            ["Review Date", str(row.get("Review Date", ""))],
+            ["NIST Mapping", str(row.get("NIST Mapping", ""))],
+            ["RMF Mapping", str(row.get("RMF Mapping", ""))],
+            ["ISO 27001 Mapping", str(row.get("ISO 27001 Mapping", ""))],
+            ["Vulnerability / Finding", str(row.get("Vulnerability / Finding", ""))],
+            ["Finding Source", str(row.get("Finding Source", ""))],
+            ["Evidence File", str(row.get("Evidence File", ""))],
+            ["Audit Status", str(row.get("Audit Status", ""))],
         ]
         content.append(pdf_table(risk_data, [180, 290]))
         content.append(Spacer(1, 8))
 
         content.append(Paragraph("Business Impact", subheading))
-        content.append(Paragraph(str(row["Business Impact"]), body))
-
-        content.append(Paragraph("Priority and Maturity Insight", subheading))
-        content.append(Paragraph(f"Priority: {str(row.get('Priority', 'Planned'))}. {str(row.get('Priority Rationale', 'Address through an appropriate remediation cycle.'))}", body))
-        content.append(Paragraph(str(row.get("Maturity Hint", "This risk pattern highlights an opportunity to improve control maturity and governance.")), body))
+        content.append(Paragraph(str(row.get("Business Impact", "")), body))
 
         content.append(Paragraph("Risk Heatmap", subheading))
         heatmap_path = create_heatmap_image(int(row["Likelihood"]), int(row["Impact"]))
         content.append(Image(heatmap_path, width=260, height=200))
-        content.append(Spacer(1, 8))
+
+        content.append(Paragraph("Mapped Controls", subheading))
+        for ctrl in str(row.get("Mapped Controls", "")).split(" | "):
+            if ctrl:
+                content.append(Paragraph(f"• {ctrl}", body))
 
         content.append(Paragraph("Recommended Controls / Solution", subheading))
-        for rec in str(row["Recommended Controls"]).split(" | "):
-            content.append(Paragraph(f"• {rec}", body))
+        for rec in str(row.get("Recommended Controls", "")).split(" | "):
+            if rec:
+                content.append(Paragraph(f"• {rec}", body))
 
-        content.append(Paragraph("Zero Trust Guidance", subheading))
-        for zt in str(row["Zero Trust Guidance"]).split(" | "):
-            content.append(Paragraph(f"• {zt}", body))
+        content.append(Paragraph("Audit Tracking", subheading))
+        content.append(Paragraph(f"Audit Status: {str(row.get('Audit Status', ''))}", body))
+        content.append(Paragraph(str(row.get("Audit Recommendation", "")), body))
 
         content.append(Paragraph("Next Steps", subheading))
-        for action in str(row["Next Steps"]).split(" | "):
-            content.append(Paragraph(f"• {action}", body))
+        for action in str(row.get("Next Steps", "")).split(" | "):
+            if action:
+                content.append(Paragraph(f"• {action}", body))
 
         content.append(Spacer(1, 14))
 
     content.append(Paragraph("Conclusion", heading))
     content.append(Paragraph(
-        "This report provides a structured evaluation of cybersecurity risk using inherent risk, residual risk, "
-        "control effectiveness, framework mapping, business impact, and recommended actions. It is designed to support "
-        "security governance, risk prioritization, executive reporting, and remediation planning.",
+        "This report supports enterprise GRC workflows by linking vulnerabilities, assets, risk factors, "
+        "controls, evidence, audit readiness, and framework mappings into one risk register workflow.",
         body
     ))
 
@@ -835,30 +838,10 @@ def generate_pdf_report(df):
     return file_path
 
 
-def create_heatmap(likelihood, impact):
-    matrix = [[i * j for i in range(1, 6)] for j in range(5, 0, -1)]
-    fig, ax = plt.subplots(figsize=(5, 4))
-    ax.imshow(matrix)
-
-    for y in range(5):
-        for x in range(5):
-            ax.text(x, y, str(matrix[y][x]), ha="center", va="center")
-
-    ax.scatter(likelihood - 1, 5 - impact, s=250, marker="o")
-    ax.set_xticks(range(5))
-    ax.set_xticklabels([1, 2, 3, 4, 5])
-    ax.set_yticks(range(5))
-    ax.set_yticklabels([5, 4, 3, 2, 1])
-    ax.set_xlabel("Likelihood")
-    ax.set_ylabel("Impact")
-    ax.set_title("Risk Heatmap")
-    return fig
-
-
 # ---------------- SIDEBAR ----------------
 with st.sidebar:
     st.markdown("## 🛡️ Enterprise Risk Platform")
-    st.caption("NIST CSF • RMF • Zero Trust • Residual Risk")
+    st.caption("NIST CSF • ISO 27001 • RMF • Zero Trust • Evidence")
     st.divider()
 
     st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
@@ -891,11 +874,10 @@ with st.sidebar:
 st.markdown("""
 <div class="hero-box">
   <h1>🛡️ Enterprise GRC Risk Intelligence Platform</h1>
-  <p>Translate business risk into measurable cybersecurity risk. Assess inherent risk, residual risk, business impact,
-  treatment strategy, framework alignment, and executive-ready reporting.</p>
+  <p>Translate vulnerabilities and business risks into measurable GRC decisions. Assess risk score, residual risk,
+  asset value, evidence, audit status, framework mappings, and executive-ready reporting.</p>
 </div>
 """, unsafe_allow_html=True)
-
 
 main_tab, dashboard_tab = st.tabs(["📋 Risk Assessment", "📊 Risk Register & Dashboard"])
 
@@ -926,22 +908,36 @@ with main_tab:
         status = st.selectbox("Risk Status", ["Open", "In Progress", "Accepted", "Transferred", "Closed"])
         review_date = st.date_input("Review Date", value=date.today())
 
-    st.markdown("### 🎛️ Control Effectiveness")
-    control_effectiveness = st.slider(
-        "How effective are current controls?",
-        min_value=0,
-        max_value=90,
-        value=30,
-        step=5,
-        help="Higher control effectiveness reduces residual risk. Example: MFA, backups, monitoring, segmentation."
-    )
+    st.markdown("### 🎛️ Risk Factors")
+    rf1, rf2 = st.columns(2)
+    with rf1:
+        asset_value = st.slider("Asset Value / Business Criticality (1–5)", 1, 5, 3, 1)
+    with rf2:
+        control_effectiveness = st.slider("Control Effectiveness (1–5)", 1, 5, 3, 1)
+    st.caption("Formula used: Risk Score = (Likelihood × Impact × Asset Value) ÷ Control Effectiveness")
+
+    st.markdown("### 🧩 Vulnerability, Evidence & Audit Tracking")
+    v1, v2, v3 = st.columns(3)
+    with v1:
+        vulnerability_name = st.text_input("Linked Vulnerability / Finding", value="", placeholder="Example: CVE, weak MFA, exposed bucket")
+        vulnerability_severity = st.selectbox("Vulnerability Severity", ["Not Linked", "Low", "Medium", "High", "Critical"])
+    with v2:
+        vulnerability_source = st.selectbox("Finding Source", ["Manual Assessment", "Nessus", "Splunk", "SIEM", "EDR", "Cloud Security Tool", "Audit Finding", "Other"])
+        audit_status = st.selectbox("Audit Status", ["Evidence Missing", "Needs Review", "Remediation In Progress", "Audit Ready"])
+    with v3:
+        evidence_owner = st.text_input("Evidence / Control Owner", value="Security / IT Team")
+        evidence_file = st.file_uploader("Upload Evidence", type=["pdf", "png", "jpg", "jpeg", "csv", "txt", "xlsx", "docx"])
+    evidence_name = evidence_file.name if evidence_file is not None else "No evidence uploaded"
+
+    with st.expander("🔌 Integration Notes: Nessus / Splunk"):
+        st.write("- **Nessus:** Export scan findings as CSV and link plugin ID, severity, vulnerability name, and affected asset to this risk.")
+        st.write("- **Splunk:** Use SIEM alerts/log searches as evidence for failed logins, malware detections, suspicious traffic, or timelines.")
+        st.write("- This version supports manual linking and evidence upload. A future version can connect directly to Nessus/Splunk APIs.")
 
     st.markdown("---")
 
     if st.session_state.input_mode == "smart":
         st.subheader("💬 Describe the Risk")
-        st.caption("Use plain English. Example: 'A vendor that stores our HR data had a breach.'")
-
         ex_cols = st.columns(3)
         for idx, example in enumerate(EXAMPLE_PROMPTS):
             with ex_cols[idx % 3]:
@@ -949,15 +945,10 @@ with main_tab:
                     st.session_state.smart_description = example
                     st.rerun()
 
-        description = st.text_area(
-            "Risk Description",
-            value=st.session_state.smart_description,
-            height=120,
-            placeholder="Describe the risk, issue, incident, or concern..."
-        )
+        description = st.text_area("Risk Description", value=st.session_state.smart_description, height=120)
         st.session_state.smart_description = description
-
         ready = len(description.strip()) > 10
+
         if st.button("🚀 Analyze Risk", type="primary", disabled=not ready):
             parsed = ai_analyze_description(description)
             fallback_asset, fallback_threat = fallback_detect_from_description(description)
@@ -966,11 +957,7 @@ with main_tab:
                 asset, threat = fallback_asset, fallback_threat
                 likelihood, impact, reasons = calculate_auto_scores(asset, threat, [])
                 plain_summary = f"The assessment indicates a {threat.lower()} risk affecting the {asset.lower()}."
-                actions = [
-                    {"tag": "Do now", "text": "Contain the issue and limit further exposure."},
-                    {"tag": "This week", "text": "Review relevant controls and determine root cause."},
-                    {"tag": "Document", "text": "Record the risk and track remediation actions."},
-                ]
+                actions = []
                 confidence = "medium"
             else:
                 asset = parsed.get("asset", fallback_asset)
@@ -981,7 +968,6 @@ with main_tab:
                     threat = fallback_threat
                 if threat not in ASSET_THREAT_MAP.get(asset, []):
                     threat = ASSET_THREAT_MAP[asset][0]
-
                 likelihood = max(1, min(5, int(parsed.get("likelihood", 3))))
                 impact = max(1, min(5, int(parsed.get("impact", 3))))
                 reasons = ["Smart Mode used the description to estimate likelihood and impact."]
@@ -989,12 +975,11 @@ with main_tab:
                 actions = parsed.get("actions", [])
                 confidence = parsed.get("confidence", "medium")
 
-            inherent, residual = calculate_risks(likelihood, impact, control_effectiveness)
-            inherent_level, inherent_emoji, inherent_color = risk_level(inherent)
+            raw_factor, residual = calculate_risks(likelihood, impact, asset_value, control_effectiveness)
             residual_level, residual_emoji, residual_color = risk_level(residual)
+            priority, priority_reason = get_priority_flag(residual)
             treatment, treatment_reason = suggest_treatment(threat, residual)
 
-            impact_text = business_impact(threat, asset, industry)
             controls = get_recommendations(threat)
             zt = get_zero_trust_guidance(threat)
             next_steps = get_treatment_actions(treatment, residual)
@@ -1011,50 +996,49 @@ with main_tab:
                 "Threat": threat,
                 "Likelihood": likelihood,
                 "Impact": impact,
-                "Inherent Risk": inherent,
-                "Inherent Level": inherent_level,
+                "Asset Value": asset_value,
+                "Control Effectiveness": control_effectiveness,
+                "Raw Risk Factor": raw_factor,
                 "Residual Risk": residual,
                 "Residual Level": residual_level,
                 "Residual Emoji": residual_emoji,
                 "Residual Color": residual_color,
-                "Control Effectiveness": control_effectiveness,
+                "Priority": priority,
+                "Priority Rationale": priority_reason,
                 "Final Treatment": treatment,
                 "Suggested Treatment": treatment,
                 "Treatment Reason": treatment_reason,
-                "Business Impact": impact_text,
+                "Business Impact": business_impact(threat, asset, industry),
                 "Plain English Summary": plain_summary,
                 "AI Actions": actions,
                 "NIST Mapping": get_nist_mapping(threat),
                 "RMF Mapping": get_rmf_mapping(threat),
+                "ISO 27001 Mapping": get_iso27001_mapping(threat),
+                "Mapped Controls": " | ".join(get_control_mapping(threat)),
                 "Zero Trust Guidance": " | ".join(zt),
                 "Recommended Controls": " | ".join(controls),
                 "Next Steps": " | ".join(next_steps),
-                "Confidence": confidence,
-                "Priority": get_priority_flag(residual)[0],
-                "Priority Rationale": get_priority_flag(residual)[1],
+                "Vulnerability / Finding": vulnerability_name or "Not linked",
+                "Vulnerability Severity": vulnerability_severity,
+                "Finding Source": vulnerability_source,
+                "Evidence File": evidence_name,
+                "Evidence Owner": evidence_owner,
+                "Audit Status": audit_status,
+                "Audit Recommendation": get_audit_recommendation(audit_status),
                 "Maturity Hint": get_maturity_hint(threat, asset, control_effectiveness),
+                "Confidence": confidence,
                 "Scoring Notes": " | ".join(reasons),
             }
 
     else:
         st.subheader("🧾 Analyst Inputs")
-
-        asset = st.selectbox(
-            "Asset",
-            ASSET_OPTIONS,
-            index=ASSET_OPTIONS.index(st.session_state.selected_asset)
-        )
+        asset = st.selectbox("Asset", ASSET_OPTIONS, index=ASSET_OPTIONS.index(st.session_state.selected_asset))
         st.session_state.selected_asset = asset
 
         relevant_threats = ASSET_THREAT_MAP[asset]
         if st.session_state.selected_threat not in relevant_threats:
             st.session_state.selected_threat = relevant_threats[0]
-
-        threat = st.selectbox(
-            "Threat",
-            relevant_threats,
-            index=relevant_threats.index(st.session_state.selected_threat)
-        )
+        threat = st.selectbox("Threat", relevant_threats, index=relevant_threats.index(st.session_state.selected_threat))
         st.session_state.selected_threat = threat
 
         likelihood, impact, reasons = calculate_auto_scores(asset, threat, [])
@@ -1069,12 +1053,10 @@ with main_tab:
                 st.write(f"- {r}")
 
         if st.button("🚀 Analyze Risk", type="primary"):
-            inherent, residual = calculate_risks(likelihood, impact, control_effectiveness)
-            inherent_level, inherent_emoji, inherent_color = risk_level(inherent)
+            raw_factor, residual = calculate_risks(likelihood, impact, asset_value, control_effectiveness)
             residual_level, residual_emoji, residual_color = risk_level(residual)
+            priority, priority_reason = get_priority_flag(residual)
             treatment, treatment_reason = suggest_treatment(threat, residual)
-
-            impact_text = business_impact(threat, asset, industry)
             controls = get_recommendations(threat)
             zt = get_zero_trust_guidance(threat)
             next_steps = get_treatment_actions(treatment, residual)
@@ -1091,28 +1073,37 @@ with main_tab:
                 "Threat": threat,
                 "Likelihood": likelihood,
                 "Impact": impact,
-                "Inherent Risk": inherent,
-                "Inherent Level": inherent_level,
+                "Asset Value": asset_value,
+                "Control Effectiveness": control_effectiveness,
+                "Raw Risk Factor": raw_factor,
                 "Residual Risk": residual,
                 "Residual Level": residual_level,
                 "Residual Emoji": residual_emoji,
                 "Residual Color": residual_color,
-                "Control Effectiveness": control_effectiveness,
+                "Priority": priority,
+                "Priority Rationale": priority_reason,
                 "Final Treatment": treatment,
                 "Suggested Treatment": treatment,
                 "Treatment Reason": treatment_reason,
-                "Business Impact": impact_text,
+                "Business Impact": business_impact(threat, asset, industry),
                 "Plain English Summary": "",
                 "AI Actions": [],
                 "NIST Mapping": get_nist_mapping(threat),
                 "RMF Mapping": get_rmf_mapping(threat),
+                "ISO 27001 Mapping": get_iso27001_mapping(threat),
+                "Mapped Controls": " | ".join(get_control_mapping(threat)),
                 "Zero Trust Guidance": " | ".join(zt),
                 "Recommended Controls": " | ".join(controls),
                 "Next Steps": " | ".join(next_steps),
-                "Confidence": "high",
-                "Priority": get_priority_flag(residual)[0],
-                "Priority Rationale": get_priority_flag(residual)[1],
+                "Vulnerability / Finding": vulnerability_name or "Not linked",
+                "Vulnerability Severity": vulnerability_severity,
+                "Finding Source": vulnerability_source,
+                "Evidence File": evidence_name,
+                "Evidence Owner": evidence_owner,
+                "Audit Status": audit_status,
+                "Audit Recommendation": get_audit_recommendation(audit_status),
                 "Maturity Hint": get_maturity_hint(threat, asset, control_effectiveness),
+                "Confidence": "high",
                 "Scoring Notes": " | ".join(reasons),
             }
 
@@ -1128,17 +1119,13 @@ with main_tab:
 
         r1, r2, r3, r4 = st.columns(4)
         with r1:
-            st.markdown(f"""<div class="card {card_class}">
-            <h4>Inherent Risk</h4><h2>{result['Inherent Risk']}/25</h2></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="card {card_class}"><h4>Raw Risk Factor</h4><h2>{result['Raw Risk Factor']}</h2></div>""", unsafe_allow_html=True)
         with r2:
-            st.markdown(f"""<div class="card {card_class}">
-            <h4>Residual Risk</h4><h2>{result['Residual Risk']}/25</h2></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="card {card_class}"><h4>Residual Risk</h4><h2>{result['Residual Risk']}/25</h2></div>""", unsafe_allow_html=True)
         with r3:
-            st.markdown(f"""<div class="card {card_class}">
-            <h4>Residual Level</h4><h2>{result['Residual Emoji']} {result['Residual Level']}</h2></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="card {card_class}"><h4>Residual Level</h4><h2>{result['Residual Emoji']} {result['Residual Level']}</h2></div>""", unsafe_allow_html=True)
         with r4:
-            st.markdown(f"""<div class="card">
-            <h4>Treatment</h4><h2 style="font-size:1.35rem!important;">{result['Final Treatment']}</h2></div>""", unsafe_allow_html=True)
+            st.markdown(f"""<div class="card"><h4>Priority</h4><h2 style="font-size:1.35rem!important;">{result['Priority']}</h2></div>""", unsafe_allow_html=True)
 
         if result["Residual Level"] in ["CRITICAL", "HIGH"]:
             st.error("This risk needs management attention and a clear remediation plan.")
@@ -1148,20 +1135,25 @@ with main_tab:
             st.success("This risk appears manageable, but it should still be monitored.")
 
         if result.get("Plain English Summary"):
-            st.markdown(f"""
-            <div class="plain-english-box">
-            <strong>Plain-English Summary:</strong><br>{result["Plain English Summary"]}
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"""<div class="plain-english-box"><strong>Plain-English Summary:</strong><br>{result["Plain English Summary"]}</div>""", unsafe_allow_html=True)
 
         st.subheader("💼 Business Impact")
         st.write(result["Business Impact"])
 
         st.subheader("🚦 Priority Flag")
-        st.info(f"**Priority:** {result.get('Priority', 'Planned')} — {result.get('Priority Rationale', 'Address through an appropriate remediation cycle.')}")
+        st.info(f"**Priority:** {result['Priority']} — {result['Priority Rationale']}")
 
         st.subheader("📈 Trend / Maturity Insight")
-        st.write(result.get("Maturity Hint", "This risk pattern highlights an opportunity to improve control maturity and governance."))
+        st.write(result["Maturity Hint"])
+
+        st.subheader("🧩 Vulnerability, Evidence & Audit Tracking")
+        st.write(f"**Vulnerability / Finding:** {result['Vulnerability / Finding']}")
+        st.write(f"**Severity:** {result['Vulnerability Severity']}")
+        st.write(f"**Finding Source:** {result['Finding Source']}")
+        st.write(f"**Evidence File:** {result['Evidence File']}")
+        st.write(f"**Evidence Owner:** {result['Evidence Owner']}")
+        st.write(f"**Audit Status:** {result['Audit Status']}")
+        st.info(result["Audit Recommendation"])
 
         st.subheader("✅ Recommended Solution")
         for rec in result["Recommended Controls"].split(" | "):
@@ -1170,9 +1162,13 @@ with main_tab:
         st.subheader("🧭 Risk Heatmap")
         st.pyplot(create_heatmap(result["Likelihood"], result["Impact"]))
 
-        with st.expander("🧠 Framework Mapping"):
+        with st.expander("🧠 Framework & Control Mapping"):
             st.write(f"**NIST CSF:** {result['NIST Mapping']}")
             st.write(f"**RMF:** {result['RMF Mapping']}")
+            st.write(f"**ISO 27001:** {result['ISO 27001 Mapping']}")
+            st.write("**Mapped Controls:**")
+            for item in result["Mapped Controls"].split(" | "):
+                st.write(f"- {item}")
             st.write("**Zero Trust Guidance:**")
             for item in result["Zero Trust Guidance"].split(" | "):
                 st.write(f"- {item}")
@@ -1183,20 +1179,18 @@ with main_tab:
                 st.write(f"- {action}")
 
         with st.expander("🧮 Scoring Methodology"):
-            formulas = get_formula_text()
-            for formula in formulas.values():
+            for formula in get_formula_text().values():
                 st.write(f"- {formula}")
-            st.write(f"Control Effectiveness Applied: **{result['Control Effectiveness']}%**")
-            st.write(f"Inherent Risk: **{result['Inherent Risk']}**")
-            st.write(f"Residual Risk: **{result['Residual Risk']}**")
+            st.write(f"Likelihood: **{result['Likelihood']}/5**")
+            st.write(f"Impact: **{result['Impact']}/5**")
+            st.write(f"Asset Value: **{result['Asset Value']}/5**")
+            st.write(f"Control Effectiveness: **{result['Control Effectiveness']}/5**")
+            st.write(f"Raw Risk Factor: **{result['Raw Risk Factor']}**")
+            st.write(f"Normalized Residual Risk: **{result['Residual Risk']}/25**")
 
         st.subheader("🛡️ Final Risk Treatment Decision")
         treatment_options = ["Mitigate", "Accept", "Transfer", "Avoid"]
-        selected_treatment = st.selectbox(
-            "Override treatment if needed",
-            treatment_options,
-            index=treatment_options.index(result["Final Treatment"])
-        )
+        selected_treatment = st.selectbox("Override treatment if needed", treatment_options, index=treatment_options.index(result["Final Treatment"]))
         result["Final Treatment"] = selected_treatment
 
         if st.button("💾 Save to Risk Register", type="primary"):
@@ -1246,76 +1240,32 @@ with dashboard_tab:
         st.bar_chart(df["Residual Risk"])
 
         clean_csv_columns = [
-            "Company / Unit",
-            "Report Type",
-            "Industry",
-            "Department",
-            "Risk Owner",
-            "Status",
-            "Review Date",
-            "Asset",
-            "Threat",
-            "Likelihood",
-            "Impact",
-            "Inherent Risk",
-            "Inherent Level",
-            "Control Effectiveness",
-            "Residual Risk",
-            "Residual Level",
-            "Priority",
-            "Priority Rationale",
-            "Maturity Hint",
-            "Final Treatment",
-            "Business Impact",
-            "NIST Mapping",
-            "RMF Mapping",
-            "Recommended Controls",
-            "Next Steps"
+            "Company / Unit", "Report Type", "Industry", "Department", "Risk Owner", "Status", "Review Date",
+            "Asset", "Threat", "Likelihood", "Impact", "Asset Value", "Control Effectiveness",
+            "Raw Risk Factor", "Residual Risk", "Residual Level", "Priority", "Priority Rationale",
+            "Vulnerability / Finding", "Vulnerability Severity", "Finding Source", "Evidence File", "Evidence Owner",
+            "Audit Status", "Audit Recommendation", "Business Impact", "NIST Mapping", "RMF Mapping",
+            "ISO 27001 Mapping", "Mapped Controls", "Zero Trust Guidance", "Recommended Controls", "Next Steps"
         ]
 
         df_for_export = df.copy()
         df_for_export["CSV File Type"] = "Enterprise Risk Register CSV"
         df_for_export["Assumptions & Limitations"] = " | ".join(get_assumptions_limitations())
-
-        clean_csv_columns_with_metadata = clean_csv_columns + [
-            "CSV File Type",
-            "Assumptions & Limitations"
-        ]
-
-        clean_df = df_for_export[clean_csv_columns_with_metadata]
+        clean_df = df_for_export[clean_csv_columns + ["CSV File Type", "Assumptions & Limitations"]]
         csv_data = clean_df.to_csv(index=False)
 
-        st.caption("Exports include report type, file type, assumptions, and limitations for enterprise review.")
+        st.caption("Exports include report type, file type, assumptions, limitations, vulnerability context, audit status, and framework mappings.")
 
         d1, d2, d3 = st.columns(3)
-
         with d1:
-            st.caption("Clean CSV structured for Excel, Power BI, and enterprise risk register review.")
-            st.download_button(
-                "📥 Download Clean Risk Register CSV",
-                csv_data,
-                "enterprise_risk_register.csv",
-                "text/csv"
-            )
-
+            st.download_button("📥 Download Clean Risk Register CSV", csv_data, "enterprise_risk_register.csv", "text/csv")
         with d2:
             txt = generate_professional_report(df)
-            st.download_button(
-                "📄 Download Professional Text Report",
-                txt,
-                "enterprise_grc_report.txt",
-                "text/plain"
-            )
-
+            st.download_button("📄 Download Professional Text Report", txt, "enterprise_grc_report.txt", "text/plain")
         with d3:
             pdf = generate_pdf_report(df)
             with open(pdf, "rb") as f:
-                st.download_button(
-                    "🧾 Download Professional PDF",
-                    f,
-                    "enterprise_grc_risk_report.pdf",
-                    "application/pdf"
-                )
+                st.download_button("🧾 Download Professional PDF", f, "enterprise_grc_risk_report.pdf", "application/pdf")
 
         if st.button("🗑️ Clear Risk Register"):
             st.session_state.history = []
@@ -1327,7 +1277,7 @@ st.markdown("---")
 st.markdown(f"""
 <div style="text-align:center; font-size:13px; color:#64748b; padding-bottom:1rem;">
 Built by <b>Saloni Bhosale</b> | Enterprise GRC & Cybersecurity Risk<br>
-Aligned with NIST CSF 2.0, RMF, Zero Trust, Inherent Risk, Residual Risk, and Control Effectiveness<br>
+Aligned with NIST CSF 2.0, ISO 27001, RMF, Zero Trust, Vulnerability Risk, Evidence Tracking, Audit Workflow, and Control Effectiveness<br>
 Last updated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 </div>
 """, unsafe_allow_html=True)
