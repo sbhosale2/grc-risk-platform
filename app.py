@@ -1,5 +1,6 @@
 
 import json
+import os
 import random
 from datetime import datetime, date
 from tempfile import NamedTemporaryFile
@@ -85,6 +86,15 @@ st.markdown("""
     border: 1px solid #e2e8f0;
     margin-bottom: 12px;
 }
+
+.status-ok { background:#ecfdf5; border:1px solid #86efac; color:#166534; padding:8px 10px; border-radius:10px; margin-bottom:6px; }
+.status-warn { background:#fffbeb; border:1px solid #fcd34d; color:#92400e; padding:8px 10px; border-radius:10px; margin-bottom:6px; }
+.onboarding-box { background:#eff6ff; border:1px solid #bfdbfe; border-radius:14px; padding:16px 18px; margin-bottom:16px; }
+@media (max-width: 768px) {
+    .hero-box { padding:18px 18px; }
+    .hero-box h1 { font-size:1.35rem !important; }
+    .card h2 { font-size:1.35rem !important; }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -97,6 +107,9 @@ defaults = {
     "selected_threat": "Data Breach",
     "smart_description": "",
     "input_mode": "smart",
+    "demo_role": "Admin",
+    "demo_user": "Demo Admin",
+    "show_onboarding": True,
 }
 for key, value in defaults.items():
     if key not in st.session_state:
@@ -250,6 +263,95 @@ def get_assumptions_limitations():
         "Smart Mode and fallback mapping should be validated for high-impact or regulated environments.",
         "Risk scores should be reviewed periodically as threats, assets, controls, and regulations change."
     ]
+
+
+
+def get_role_permissions(role):
+    permissions = {
+        "Admin": {"can_edit": True, "can_save": True, "can_export": True, "can_clear": True, "description": "Full demo access: create, edit, export, and clear risks."},
+        "Manager": {"can_edit": True, "can_save": True, "can_export": True, "can_clear": False, "description": "Can assess risks, save decisions, and export reports, but cannot clear the register."},
+        "Viewer": {"can_edit": False, "can_save": False, "can_export": True, "can_clear": False, "description": "Read-only demo role for reviewing dashboards and reports."},
+    }
+    return permissions.get(role, permissions["Viewer"])
+
+
+def get_integration_health():
+    anthropic_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    smart_status = "Ready" if Anthropic is not None and anthropic_key else "Fallback Mode"
+    smart_detail = "Smart Mode can use the Anthropic API." if smart_status == "Ready" else "Smart Mode will use rule-based fallback unless ANTHROPIC_API_KEY is configured."
+    return {
+        "Smart Analysis": (smart_status, smart_detail),
+        "Nessus": ("Manual Link", "Supports Nessus CSV/manual finding linkage now; direct API integration can be added later."),
+        "Splunk": ("Manual Evidence", "Supports Splunk alert/log evidence upload now; direct API integration can be added later."),
+    }
+
+
+def validate_assessment_inputs(asset_value, control_effectiveness, audit_status, evidence_name, vulnerability_severity):
+    warnings = []
+    if not (1 <= int(asset_value) <= 5):
+        warnings.append("Asset Value must be between 1 and 5.")
+    if not (1 <= int(control_effectiveness) <= 5):
+        warnings.append("Control Effectiveness must be between 1 and 5.")
+    if audit_status == "Audit Ready" and evidence_name == "No evidence uploaded":
+        warnings.append("Audit Ready is selected, but no evidence file has been uploaded.")
+    if vulnerability_severity == "Critical" and int(asset_value) <= 2:
+        warnings.append("Critical vulnerability selected with low asset value. Confirm the asset value is accurate.")
+    return warnings
+
+
+def build_demo_risk():
+    likelihood, impact, _ = calculate_auto_scores("Email System", "Phishing", [])
+    asset_value = 4
+    control_effectiveness = 3
+    raw_factor, residual = calculate_risks(likelihood, impact, asset_value, control_effectiveness)
+    residual_level, residual_emoji, residual_color = risk_level(residual)
+    priority, priority_reason = get_priority_flag(residual)
+    treatment, treatment_reason = suggest_treatment("Phishing", residual)
+    return {
+        "Company / Unit": "Demo Organization",
+        "Report Type": "Enterprise GRC Risk Assessment",
+        "Industry": "General",
+        "Department": "Information Technology",
+        "Risk Owner": "Security / IT Team",
+        "Status": "Open",
+        "Review Date": str(date.today()),
+        "Asset": "Email System",
+        "Threat": "Phishing",
+        "Likelihood": likelihood,
+        "Impact": impact,
+        "Asset Value": asset_value,
+        "Control Effectiveness": control_effectiveness,
+        "Raw Risk Factor": raw_factor,
+        "Residual Risk": residual,
+        "Residual Level": residual_level,
+        "Residual Emoji": residual_emoji,
+        "Residual Color": residual_color,
+        "Priority": priority,
+        "Priority Rationale": priority_reason,
+        "Final Treatment": treatment,
+        "Suggested Treatment": treatment,
+        "Treatment Reason": treatment_reason,
+        "Business Impact": business_impact("Phishing", "Email System", "General"),
+        "Plain English Summary": "The assessment indicates a phishing-related risk affecting the email system.",
+        "AI Actions": [],
+        "NIST Mapping": get_nist_mapping("Phishing"),
+        "RMF Mapping": get_rmf_mapping("Phishing"),
+        "ISO 27001 Mapping": get_iso27001_mapping("Phishing"),
+        "Mapped Controls": " | ".join(get_control_mapping("Phishing")),
+        "Zero Trust Guidance": " | ".join(get_zero_trust_guidance("Phishing")),
+        "Recommended Controls": " | ".join(get_recommendations("Phishing")),
+        "Next Steps": " | ".join(get_treatment_actions(treatment, residual)),
+        "Vulnerability / Finding": "Phishing simulation failure rate above target",
+        "Vulnerability Severity": "Medium",
+        "Finding Source": "Manual Assessment",
+        "Evidence File": "No evidence uploaded",
+        "Evidence Owner": "Security / IT Team",
+        "Audit Status": "Needs Review",
+        "Audit Recommendation": get_audit_recommendation("Needs Review"),
+        "Maturity Hint": get_maturity_hint("Phishing", "Email System", control_effectiveness),
+        "Confidence": "high",
+        "Scoring Notes": "Demo data loaded for first-run walkthrough.",
+    }
 
 
 def calculate_auto_scores(asset, threat, matched_words=None):
@@ -845,6 +947,23 @@ with st.sidebar:
     st.divider()
 
     st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
+    st.markdown("#### 👤 Demo Access State")
+    st.session_state.demo_user = st.text_input("Demo User", value=st.session_state.demo_user)
+    st.session_state.demo_role = st.selectbox("Role", ["Admin", "Manager", "Viewer"], index=["Admin", "Manager", "Viewer"].index(st.session_state.demo_role))
+    role_info = get_role_permissions(st.session_state.demo_role)
+    st.caption(role_info["description"])
+    st.info("Demo mode only. Production deployment should use real authentication, password reset, session timeout, and 2FA enforcement.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
+    st.markdown("#### 🩺 Integration Health")
+    for name, (status, detail) in get_integration_health().items():
+        badge_class = "status-ok" if status == "Ready" else "status-warn"
+        st.markdown(f'<div class="{badge_class}"><b>{name}:</b> {status}</div>', unsafe_allow_html=True)
+        st.caption(detail)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown('<div class="sidebar-card">', unsafe_allow_html=True)
     st.markdown("#### 🎭 Risk Mood Meter")
     if st.session_state.history:
         avg = sum(i["Residual Risk"] for i in st.session_state.history) / len(st.session_state.history)
@@ -879,11 +998,52 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
+role_info = get_role_permissions(st.session_state.demo_role)
+
+home_cols = st.columns(4)
+with home_cols[0]:
+    st.metric("Mode", "Demo")
+with home_cols[1]:
+    st.metric("Role", st.session_state.demo_role)
+with home_cols[2]:
+    st.metric("Saved Risks", len(st.session_state.history))
+with home_cols[3]:
+    st.metric("Smart Mode", get_integration_health()["Smart Analysis"][0])
+
+with st.expander("🚀 Getting Started — first-run guide", expanded=st.session_state.show_onboarding):
+    st.markdown("""
+    <div class="onboarding-box">
+    <b>What this platform does:</b> It links assets, vulnerabilities, controls, evidence, audit status, and frameworks into one risk register workflow.
+    <br><br>
+    <b>Recommended first steps:</b>
+    <ol>
+      <li>Choose a demo role and confirm the integration health panel.</li>
+      <li>Enter enterprise context such as department, owner, and review date.</li>
+      <li>Describe a risk in Smart Mode or use Analyst Mode.</li>
+      <li>Attach evidence or link a vulnerability/finding.</li>
+      <li>Save to the Risk Register and export CSV/PDF reports.</li>
+    </ol>
+    </div>
+    """, unsafe_allow_html=True)
+    start_cols = st.columns(2)
+    with start_cols[0]:
+        if st.button("Load demo data", use_container_width=True):
+            if not st.session_state.history:
+                st.session_state.history.append(build_demo_risk())
+                st.success("Demo risk loaded into the register.")
+            else:
+                st.info("Risk register already has data.")
+    with start_cols[1]:
+        if st.button("Hide guide", use_container_width=True):
+            st.session_state.show_onboarding = False
+            st.rerun()
+
 main_tab, dashboard_tab = st.tabs(["📋 Risk Assessment", "📊 Risk Register & Dashboard"])
 
 
 # ---------------- RISK ASSESSMENT ----------------
 with main_tab:
+    st.info("Key actions: describe/select a risk, attach evidence, validate scoring inputs, then save it to the risk register.")
     col_mode1, col_mode2 = st.columns(2)
     with col_mode1:
         if st.button("✨ Smart Mode — describe the risk" + (" ✓" if st.session_state.input_mode == "smart" else ""), use_container_width=True):
@@ -895,6 +1055,8 @@ with main_tab:
             st.rerun()
 
     st.markdown("---")
+    if not role_info["can_edit"]:
+        st.warning("Viewer role is read-only. Switch to Admin or Manager in the sidebar to create or modify assessments.")
 
     st.subheader("🏢 Enterprise Context")
     c1, c2, c3 = st.columns(3)
@@ -929,6 +1091,11 @@ with main_tab:
         evidence_file = st.file_uploader("Upload Evidence", type=["pdf", "png", "jpg", "jpeg", "csv", "txt", "xlsx", "docx"])
     evidence_name = evidence_file.name if evidence_file is not None else "No evidence uploaded"
 
+    validation_warnings = validate_assessment_inputs(asset_value, control_effectiveness, audit_status, evidence_name, vulnerability_severity)
+    if validation_warnings:
+        for warning in validation_warnings:
+            st.warning(warning)
+
     with st.expander("🔌 Integration Notes: Nessus / Splunk"):
         st.write("- **Nessus:** Export scan findings as CSV and link plugin ID, severity, vulnerability name, and affected asset to this risk.")
         st.write("- **Splunk:** Use SIEM alerts/log searches as evidence for failed logins, malware detections, suspicious traffic, or timelines.")
@@ -949,7 +1116,7 @@ with main_tab:
         st.session_state.smart_description = description
         ready = len(description.strip()) > 10
 
-        if st.button("🚀 Analyze Risk", type="primary", disabled=not ready):
+        if st.button("🚀 Analyze Risk", type="primary", disabled=(not ready or not role_info["can_edit"])):
             parsed = ai_analyze_description(description)
             fallback_asset, fallback_threat = fallback_detect_from_description(description)
 
@@ -1052,7 +1219,7 @@ with main_tab:
             for r in reasons:
                 st.write(f"- {r}")
 
-        if st.button("🚀 Analyze Risk", type="primary"):
+        if st.button("🚀 Analyze Risk", type="primary", disabled=(not role_info["can_edit"])):
             raw_factor, residual = calculate_risks(likelihood, impact, asset_value, control_effectiveness)
             residual_level, residual_emoji, residual_color = risk_level(residual)
             priority, priority_reason = get_priority_flag(residual)
@@ -1193,7 +1360,7 @@ with main_tab:
         selected_treatment = st.selectbox("Override treatment if needed", treatment_options, index=treatment_options.index(result["Final Treatment"]))
         result["Final Treatment"] = selected_treatment
 
-        if st.button("💾 Save to Risk Register", type="primary"):
+        if st.button("💾 Save to Risk Register", type="primary", disabled=(not role_info["can_save"])):
             st.session_state.history.append(result.copy())
             st.success("Saved to risk register.")
             st.balloons()
@@ -1210,34 +1377,53 @@ with dashboard_tab:
     st.header("📊 Risk Register & Dashboard")
 
     if not st.session_state.history:
-        st.info("No risks saved yet. Save at least one risk assessment to populate the dashboard.")
+        st.info("No risks saved yet. Use the Getting Started guide to load demo data, or create a new risk assessment from Smart Mode or Analyst Mode.")
+        if st.button("Load sample risk register entry", use_container_width=True):
+            st.session_state.history.append(build_demo_risk())
+            st.rerun()
     else:
         df = pd.DataFrame(st.session_state.history)
 
+        st.info("Key actions: review/filter the register, check charts, export reports, or clear demo data if you have Admin access.")
+
+        filter_cols = st.columns(3)
+        with filter_cols[0]:
+            selected_level = st.selectbox("Filter by residual level", ["All"] + sorted(df["Residual Level"].dropna().unique().tolist()))
+        with filter_cols[1]:
+            selected_status = st.selectbox("Filter by status", ["All"] + sorted(df["Status"].dropna().unique().tolist()))
+        with filter_cols[2]:
+            max_rows = st.slider("Rows to display", 5, 100, min(25, max(5, len(df))))
+
+        filtered_df = df.copy()
+        if selected_level != "All":
+            filtered_df = filtered_df[filtered_df["Residual Level"] == selected_level]
+        if selected_status != "All":
+            filtered_df = filtered_df[filtered_df["Status"] == selected_status]
+
         k1, k2, k3, k4 = st.columns(4)
         with k1:
-            st.metric("Total Risks", len(df))
+            st.metric("Total Risks", len(filtered_df))
         with k2:
-            st.metric("Avg Residual Risk", round(df["Residual Risk"].mean(), 1))
+            st.metric("Avg Residual Risk", round(filtered_df["Residual Risk"].mean(), 1) if not filtered_df.empty else 0)
         with k3:
-            st.metric("Highest Residual Risk", int(df["Residual Risk"].max()))
+            st.metric("Highest Residual Risk", int(filtered_df["Residual Risk"].max()) if not filtered_df.empty else 0)
         with k4:
-            st.metric("Open Risks", int((df["Status"] != "Closed").sum()))
+            st.metric("Open Risks", int((filtered_df["Status"] != "Closed").sum()) if not filtered_df.empty else 0)
 
         st.subheader("Risk Register")
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(filtered_df.head(max_rows), use_container_width=True, height=360)
 
         st.subheader("Visual Dashboard")
         c1, c2 = st.columns(2)
         with c1:
             st.write("Residual Risk by Level")
-            st.bar_chart(df["Residual Level"].value_counts())
+            st.bar_chart(filtered_df["Residual Level"].value_counts())
         with c2:
             st.write("Risk Treatment Distribution")
-            st.bar_chart(df["Final Treatment"].value_counts())
+            st.bar_chart(filtered_df["Final Treatment"].value_counts())
 
         st.write("Residual Risk Trend")
-        st.bar_chart(df["Residual Risk"])
+        st.bar_chart(filtered_df["Residual Risk"])
 
         clean_csv_columns = [
             "Company / Unit", "Report Type", "Industry", "Department", "Risk Owner", "Status", "Review Date",
@@ -1248,7 +1434,7 @@ with dashboard_tab:
             "ISO 27001 Mapping", "Mapped Controls", "Zero Trust Guidance", "Recommended Controls", "Next Steps"
         ]
 
-        df_for_export = df.copy()
+        df_for_export = filtered_df.copy()
         df_for_export["CSV File Type"] = "Enterprise Risk Register CSV"
         df_for_export["Assumptions & Limitations"] = " | ".join(get_assumptions_limitations())
         clean_df = df_for_export[clean_csv_columns + ["CSV File Type", "Assumptions & Limitations"]]
@@ -1260,14 +1446,14 @@ with dashboard_tab:
         with d1:
             st.download_button("📥 Download Clean Risk Register CSV", csv_data, "enterprise_risk_register.csv", "text/csv")
         with d2:
-            txt = generate_professional_report(df)
+            txt = generate_professional_report(filtered_df)
             st.download_button("📄 Download Professional Text Report", txt, "enterprise_grc_report.txt", "text/plain")
         with d3:
-            pdf = generate_pdf_report(df)
+            pdf = generate_pdf_report(filtered_df)
             with open(pdf, "rb") as f:
                 st.download_button("🧾 Download Professional PDF", f, "enterprise_grc_risk_report.pdf", "application/pdf")
 
-        if st.button("🗑️ Clear Risk Register"):
+        if st.button("🗑️ Clear Risk Register", disabled=(not role_info["can_clear"])):
             st.session_state.history = []
             st.rerun()
 
