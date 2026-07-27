@@ -1606,8 +1606,9 @@ def create_heatmap(likelihood: int, impact: int) -> plt.Figure:
 def create_heatmap_image(likelihood: int, impact: int) -> str:
     fig = create_heatmap(likelihood, impact)
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".png", prefix="grc_heatmap_")
-    fig.savefig(tmp.name, bbox_inches="tight", dpi=200)
+    fig.savefig(tmp.name, bbox_inches="tight", dpi=96)
     plt.close(fig)
+    plt.close("all")   # ensure all figures released
     st.session_state["_temp_files"].append(tmp.name)
     return tmp.name
 
@@ -1922,6 +1923,8 @@ def generate_pdf_unified(
     soc2_state: dict,
 ) -> str:
     """Generate a unified PDF report covering all four data sources."""
+    cleanup_temp_files()   # free memory before generating
+    plt.close("all")
     path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf", prefix="grc_unified_").name
     st.session_state["_temp_files"].append(path)
 
@@ -2131,7 +2134,7 @@ def generate_pdf_unified(
     if df.empty:
         c.append(Paragraph("No risk entries in the register.", S["note"]))
     else:
-        for i, row in df.iterrows():
+        for i, row in df.head(30).iterrows():
             block = []
             if i == 0:
                 block.append(Paragraph("Section 4 - Risk Register Detail", S["h1"]))
@@ -2173,10 +2176,16 @@ def generate_pdf_unified(
             block.append(Paragraph(str(row.get("Business Impact", ""))[:400], S["body"]))
             block.append(Spacer(1, 6))
 
-            hm_path = create_heatmap_image(int(row["Likelihood"]), int(row["Impact"]))
-            block.append(Paragraph("Risk Heatmap", S["h3"]))
-            block.append(Image(hm_path, width=200, height=155))
-            block.append(Spacer(1, 6))
+            if len(df) <= 15:
+                hm_path = create_heatmap_image(int(row["Likelihood"]), int(row["Impact"]))
+                block.append(Paragraph("Risk Heatmap", S["h3"]))
+                block.append(Image(hm_path, width=180, height=140))
+                block.append(Spacer(1, 6))
+            else:
+                block.append(Paragraph(
+                    f"Heatmap: L={row.get('Likelihood','?')} x I={row.get('Impact','?')} "
+                    f"({row.get('Heatmap Summary','')})", S["body"]
+                ))
 
             block.append(Paragraph("Recommended Controls", S["h3"]))
             for rec in str(row.get("Recommended Controls", "")).split(" | "):
@@ -2295,6 +2304,8 @@ def generate_txt_report(df: pd.DataFrame) -> str:
 
 
 def generate_pdf_report(df: pd.DataFrame) -> str:
+    cleanup_temp_files()   # free memory before generating new PDF
+    plt.close("all")
     path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf", prefix="grc_report_").name
     st.session_state["_temp_files"].append(path)
 
@@ -2359,7 +2370,7 @@ def generate_pdf_report(df: pd.DataFrame) -> str:
         ], [260, 200]))
         c.append(Spacer(1, 14))
 
-        for i, row in df.iterrows():
+        for i, row in df.head(30).iterrows():
             block = []
             # Add section heading only before first entry — keeps with content
             if i == 0:
@@ -2404,11 +2415,17 @@ def generate_pdf_report(df: pd.DataFrame) -> str:
             block.append(Paragraph(str(row.get("Business Impact", ""))[:400], S["body"]))
             block.append(Spacer(1, 6))
 
-            # Heatmap
-            hm_path = create_heatmap_image(int(row["Likelihood"]), int(row["Impact"]))
-            block.append(Paragraph("Risk Heatmap", S["h2"]))
-            block.append(Image(hm_path, width=200, height=155))
-            block.append(Spacer(1, 6))
+            # Heatmap - only include if small register to save memory
+            if len(df) <= 15:
+                hm_path = create_heatmap_image(int(row["Likelihood"]), int(row["Impact"]))
+                block.append(Paragraph("Risk Heatmap", S["h2"]))
+                block.append(Image(hm_path, width=180, height=140))
+                block.append(Spacer(1, 6))
+            else:
+                block.append(Paragraph(
+                    f"Heatmap: L={row.get('Likelihood','?')} x I={row.get('Impact','?')} "
+                    f"({row.get('Heatmap Summary','')})", S["body"]
+                ))
 
             # Controls
             block.append(Paragraph("Recommended Controls", S["h2"]))
@@ -3288,6 +3305,8 @@ def generate_executive_summary_pdf(
     alert_df,
 ) -> str:
     """Single-page executive summary a CEO can hand to their board or auditor."""
+    cleanup_temp_files()   # free memory before generating
+    plt.close("all")
     path = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf",
                                        prefix="grc_exec_summary_").name
     st.session_state["_temp_files"].append(path)
