@@ -2207,8 +2207,9 @@ def generate_pdf_unified(
             block.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#E2E8F0")))
             block.append(Spacer(1, 8))
             # Keep heading + title + table together so nothing orphans on page break
-            c.append(KeepTogether(block[:5]))
-            c.extend(block[5:])
+            # Only keep section heading + risk title together (prevents orphan headings)
+            c.append(KeepTogether(block[:2]))
+            c.extend(block[2:])
 
     # ── Conclusion ──
     c.append(Spacer(1, 10))
@@ -2419,7 +2420,7 @@ def generate_pdf_report(df: pd.DataFrame) -> str:
                                      color=colors.HexColor("#E2E8F0")))
             block.append(Spacer(1, 10))
             # Keep heading + risk title + first table together on same page
-            c.append(KeepTogether(block[:4]))
+            c.append(KeepTogether(block[:2]))
             c.extend(block[4:])
             block.append(Paragraph(str(row.get("Heatmap Summary", "")), S["mono"]))
             block.append(Spacer(1, 7))
@@ -2442,7 +2443,7 @@ def generate_pdf_report(df: pd.DataFrame) -> str:
             block.append(Spacer(1, 16))
             block.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#E2E8F0")))
             block.append(Spacer(1, 10))
-            c.append(KeepTogether(block[:4]))
+            c.append(KeepTogether(block[:2]))
             c.extend(block[4:])
 
     c.append(Paragraph("Conclusion", S["h1"]))
