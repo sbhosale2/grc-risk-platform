@@ -1707,22 +1707,38 @@ def _page_decoration(canvas, doc):
 
 
 def _pdf_table(data: list, widths: list) -> Table:
-    t = Table(data, colWidths=widths)
+    from reportlab.platypus import Paragraph
+    from reportlab.lib.styles import ParagraphStyle
+    NAVY  = colors.HexColor("#1E3A5F")
+    LIGHT = colors.HexColor("#F8FAFC")
+    ALT   = colors.HexColor("#F1F5F9")
+    _cell_style = ParagraphStyle("cs", fontName="Helvetica", fontSize=8.5,
+                                  leading=12, textColor=colors.HexColor("#1E293B"))
+    _head_style = ParagraphStyle("hs", fontName="Helvetica-Bold", fontSize=8.5,
+                                  leading=12, textColor=colors.white)
+    # Wrap every cell in a Paragraph so text wraps properly
+    wrapped = []
+    for ri, row in enumerate(data):
+        wrapped_row = []
+        for ci, cell in enumerate(row):
+            txt = str(cell) if cell is not None else ""
+            style = _head_style if ri == 0 else _cell_style
+            wrapped_row.append(Paragraph(txt, style))
+        wrapped.append(wrapped_row)
+
+    t = Table(wrapped, colWidths=widths, repeatRows=1)
     t.setStyle(TableStyle([
-        ("BACKGROUND",   (0, 0), (-1, 0),  colors.HexColor("#1E3A5F")),
-        ("TEXTCOLOR",    (0, 0), (-1, 0),  colors.white),
-        ("FONTNAME",     (0, 0), (-1, 0),  "Helvetica-Bold"),
-        ("FONTSIZE",     (0, 0), (-1, -1), 9),
-        ("GRID",         (0, 0), (-1, -1), 0.35, colors.HexColor("#CBD5E1")),
-        ("BACKGROUND",   (0, 1), (-1, -1), colors.HexColor("#F8FAFC")),
-        ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.white, colors.HexColor("#F1F5F9")]),
-        ("VALIGN",       (0, 0), (-1, -1), "TOP"),
-        ("LEFTPADDING",  (0, 0), (-1, -1), 7),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 7),
-        ("TOPPADDING",   (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING",(0, 0), (-1, -1), 5),
+        ("BACKGROUND",    (0, 0), (-1, 0),  NAVY),
+        ("ROWBACKGROUNDS",(0, 1), (-1, -1), [colors.white, ALT]),
+        ("GRID",          (0, 0), (-1, -1), 0.3, colors.HexColor("#CBD5E1")),
+        ("VALIGN",        (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING",   (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING",  (0, 0), (-1, -1), 8),
+        ("TOPPADDING",    (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
     ]))
     return t
+
 
 
 # ─────────────────────────────────────────────────────────────
@@ -2112,24 +2128,63 @@ def generate_pdf_unified(
 
     # ── Section 4: Risk Register ──
     c.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#CBD5E1")))
-    c.append(Paragraph("Section 4 - Risk Register Detail", S["h1"]))
     if df.empty:
         c.append(Paragraph("No risk entries in the register.", S["note"]))
     else:
         for i, row in df.iterrows():
             block = []
+            if i == 0:
+                block.append(Paragraph("Section 4 - Risk Register Detail", S["h1"]))
             block.append(Paragraph(f"Risk {i+1}: {row['Asset']} - {row['Threat']}", S["h2"]))
+
+            # Core scores
             block.append(_pdf_table([
                 ["Field", "Value"],
-                *[[fld, str(row.get(fld, ""))] for fld in [
-                    "Company / Unit","Industry","Department","Risk Owner","Status","Review Date",
-                    "Asset","Threat","Likelihood","Impact","Asset Value","Control Effectiveness",
-                    "Inherent Risk","Residual Risk","Residual Level","Priority","Final Treatment",
-                    "NIST Mapping","RMF Mapping","ISO 27001 Mapping",
-                    "Vulnerability / Finding","Vulnerability Severity","Finding Source",
-                    "Evidence File","Audit Status",
-                ]]
-            ], [185, 290]))
+                ["Asset",          str(row.get("Asset",""))],
+                ["Threat",         str(row.get("Threat",""))],
+                ["Inherent Risk",  f"{row.get('Inherent Risk','')} / 25"],
+                ["Residual Risk",  f"{row.get('Residual Risk','')} / 25"],
+                ["Risk Level",     str(row.get("Residual Level",""))],
+                ["Priority",       str(row.get("Priority",""))],
+                ["Treatment",      str(row.get("Final Treatment",""))],
+                ["Treatment Owner",str(row.get("Treatment Owner",""))],
+                ["Target Date",    str(row.get("Treatment Target Date",""))],
+                ["Status",         str(row.get("Status",""))],
+                ["Audit Status",   str(row.get("Audit Status",""))],
+                ["Review Date",    str(row.get("Review Date",""))],
+            ], [160, 310]))
+            block.append(Spacer(1, 6))
+
+            # Framework mappings
+            block.append(Paragraph("Framework Mappings", S["h3"]))
+            block.append(_pdf_table([
+                ["Framework", "Mapping"],
+                ["NIST CSF",  str(row.get("NIST Mapping",""))],
+                ["NIST RMF",  str(row.get("RMF Mapping",""))],
+                ["ISO 27001", str(row.get("ISO 27001 Mapping",""))],
+                ["HIPAA",     str(row.get("HIPAA Mapping",""))],
+                ["PCI DSS",   str(row.get("PCI DSS Mapping",""))],
+                ["GDPR",      str(row.get("GDPR Mapping",""))],
+                ["CCPA",      str(row.get("CCPA Mapping",""))],
+            ], [90, 380]))
+            block.append(Spacer(1, 6))
+
+            block.append(Paragraph("Business Impact", S["h3"]))
+            block.append(Paragraph(str(row.get("Business Impact", ""))[:400], S["body"]))
+            block.append(Spacer(1, 6))
+
+            hm_path = create_heatmap_image(int(row["Likelihood"]), int(row["Impact"]))
+            block.append(Paragraph("Risk Heatmap", S["h3"]))
+            block.append(Image(hm_path, width=200, height=155))
+            block.append(Spacer(1, 6))
+
+            block.append(Paragraph("Recommended Controls", S["h3"]))
+            for rec in str(row.get("Recommended Controls", "")).split(" | "):
+                if rec: block.append(Paragraph(f"• {rec}", S["body"]))
+
+            block.append(Paragraph("Next Steps", S["h3"]))
+            for step in str(row.get("Next Steps", "")).split(" | "):
+                if step: block.append(Paragraph(f"• {step}", S["body"]))
             block.append(Spacer(1, 6))
             block.append(Paragraph("Business Impact", S["h3"]))
             block.append(Paragraph(str(row.get("Business Impact", "")), S["body"]))
@@ -2151,8 +2206,9 @@ def generate_pdf_unified(
             block.append(Spacer(1, 12))
             block.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#E2E8F0")))
             block.append(Spacer(1, 8))
-            c.append(KeepTogether(block[:4]))
-            c.extend(block[4:])
+            # Keep heading + title + table together so nothing orphans on page break
+            c.append(KeepTogether(block[:5]))
+            c.extend(block[5:])
 
     # ── Conclusion ──
     c.append(Spacer(1, 10))
@@ -2302,29 +2358,69 @@ def generate_pdf_report(df: pd.DataFrame) -> str:
         ], [260, 200]))
         c.append(Spacer(1, 14))
 
-        c.append(Paragraph("Risk Assessment Details", S["h1"]))
         for i, row in df.iterrows():
             block = []
-            block.append(Paragraph(f"Entry {i+1}: {row['Asset']} - {row['Threat']}", S["h2"]))
+            # Add section heading only before first entry — keeps with content
+            if i == 0:
+                block.append(Paragraph("Risk Assessment Details", S["h1"]))
+            block.append(Paragraph(f"Risk {i+1}: {row['Asset']} - {row['Threat']}", S["h2"]))
+
+            # Core scores table — compact and clean
             block.append(_pdf_table([
                 ["Field", "Value"],
-                *[[fld, str(row.get(fld, ""))] for fld in [
-                    "Company / Unit","Industry","Department","Risk Owner","Status","Review Date",
-                    "Asset","Threat","Likelihood","Impact","Asset Value","Control Effectiveness",
-                    "Inherent Risk","Residual Risk","Residual Level","Priority","Final Treatment",
-                    "NIST Mapping","RMF Mapping","ISO 27001 Mapping",
-                    "Vulnerability / Finding","Vulnerability Severity","Finding Source",
-                    "Evidence File","Audit Status",
-                ]]
-            ], [185, 290]))
-            block.append(Spacer(1, 7))
-            block.append(Paragraph("Business Impact", S["h2"]))
-            block.append(Paragraph(str(row.get("Business Impact", "")), S["body"]))
-            block.append(Spacer(1, 7))
+                ["Asset",               str(row.get("Asset",""))],
+                ["Threat",              str(row.get("Threat",""))],
+                ["Inherent Risk",       f"{row.get('Inherent Risk','')} / 25"],
+                ["Residual Risk",       f"{row.get('Residual Risk','')} / 25"],
+                ["Risk Level",          str(row.get("Residual Level",""))],
+                ["Priority",            str(row.get("Priority",""))],
+                ["Treatment",           str(row.get("Final Treatment",""))],
+                ["Treatment Owner",     str(row.get("Treatment Owner",""))],
+                ["Target Date",         str(row.get("Treatment Target Date",""))],
+                ["Status",              str(row.get("Status",""))],
+                ["Audit Status",        str(row.get("Audit Status",""))],
+                ["Risk Owner",          str(row.get("Risk Owner",""))],
+                ["Review Date",         str(row.get("Review Date",""))],
+            ], [160, 310]))
+            block.append(Spacer(1, 6))
 
+            # Framework mappings table
+            block.append(Paragraph("Framework Mappings", S["h2"]))
+            block.append(_pdf_table([
+                ["Framework", "Mapping"],
+                ["NIST CSF 2.0",  str(row.get("NIST Mapping",""))],
+                ["NIST RMF",      str(row.get("RMF Mapping",""))],
+                ["ISO 27001",     str(row.get("ISO 27001 Mapping",""))],
+                ["HIPAA",         str(row.get("HIPAA Mapping",""))],
+                ["PCI DSS",       str(row.get("PCI DSS Mapping",""))],
+                ["GDPR",          str(row.get("GDPR Mapping",""))],
+                ["CCPA",          str(row.get("CCPA Mapping",""))],
+            ], [90, 380]))
+            block.append(Spacer(1, 6))
+
+            # Business impact
+            block.append(Paragraph("Business Impact", S["h2"]))
+            block.append(Paragraph(str(row.get("Business Impact", ""))[:400], S["body"]))
+            block.append(Spacer(1, 6))
+
+            # Heatmap
             hm_path = create_heatmap_image(int(row["Likelihood"]), int(row["Impact"]))
             block.append(Paragraph("Risk Heatmap", S["h2"]))
-            block.append(Image(hm_path, width=230, height=175))
+            block.append(Image(hm_path, width=200, height=155))
+            block.append(Spacer(1, 6))
+
+            # Controls
+            block.append(Paragraph("Recommended Controls", S["h2"]))
+            for rec in str(row.get("Recommended Controls", "")).split(" | "):
+                if rec: block.append(Paragraph(f"• {rec}", S["body"]))
+
+            block.append(Spacer(1, 16))
+            block.append(HRFlowable(width="100%", thickness=0.5,
+                                     color=colors.HexColor("#E2E8F0")))
+            block.append(Spacer(1, 10))
+            # Keep heading + risk title + first table together on same page
+            c.append(KeepTogether(block[:4]))
+            c.extend(block[4:])
             block.append(Paragraph(str(row.get("Heatmap Summary", "")), S["mono"]))
             block.append(Spacer(1, 7))
 
@@ -2346,8 +2442,8 @@ def generate_pdf_report(df: pd.DataFrame) -> str:
             block.append(Spacer(1, 16))
             block.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#E2E8F0")))
             block.append(Spacer(1, 10))
-            c.append(KeepTogether(block[:6]))   # keep header + table together
-            c.extend(block[6:])
+            c.append(KeepTogether(block[:4]))
+            c.extend(block[4:])
 
     c.append(Paragraph("Conclusion", S["h1"]))
     c.append(Paragraph(
@@ -3258,19 +3354,15 @@ def generate_executive_summary_pdf(
     # ── HERO HEADER BAND ──────────────────────────────────────
     header_tbl = Table([[
         Paragraph(f"{company}", S["co"]),
-        Paragraph(f"GRC Executive Risk Summary", S["co"]),
-        Paragraph(f"{datetime.now().strftime('%B %d, %Y')}", S["co"]),
-    ]], colWidths=[160, 240, 100])
+        Paragraph(f"GRC Executive Risk Summary  |  {datetime.now().strftime('%B %d, %Y')}", S["co"]),
+    ]], colWidths=[180, 320])
     header_tbl.setStyle(TableStyle([
         ("BACKGROUND",   (0,0),(-1,-1), NAVY),
-        ("TOPPADDING",   (0,0),(-1,-1), 14),
-        ("BOTTOMPADDING",(0,0),(-1,-1), 14),
-        ("LEFTPADDING",  (0,0),(-1,-1), 14),
-        ("RIGHTPADDING", (0,0),(-1,-1), 14),
-        ("ALIGN",        (2,0),(2,0), "RIGHT"),
-        ("TEXTCOLOR",    (0,0),(-1,-1), colors.white),
-        ("FONTNAME",     (0,0),(-1,-1), "Helvetica-Bold"),
-        ("FONTSIZE",     (0,0),(-1,-1), 11),
+        ("TOPPADDING",   (0,0),(-1,-1), 16),
+        ("BOTTOMPADDING",(0,0),(-1,-1), 16),
+        ("LEFTPADDING",  (0,0),(-1,-1), 16),
+        ("RIGHTPADDING", (0,0),(-1,-1), 16),
+        ("VALIGN",       (0,0),(-1,-1), "MIDDLE"),
     ]))
     c.append(header_tbl)
     c.append(Spacer(1, 10))
